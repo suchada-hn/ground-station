@@ -76,11 +76,19 @@ const normalizeGnssConstellation = (value) => {
     return raw.toUpperCase();
 };
 
+const parseGnssPrnValue = (value) => {
+    if (value === null || value === undefined) return null;
+    const match = String(value).toUpperCase().match(/(\d{1,3})/);
+    if (!match) return null;
+    const parsed = Number(match[1]);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
 const extractGnssSatelliteIdentity = (output) => {
     if (!output) return null;
 
     const code = String(output.satellite_system || '').trim().toUpperCase();
-    const prnFromFields = Number(output.satellite_prn);
+    const prnFromFields = parseGnssPrnValue(output.satellite_prn);
     if (code && Number.isFinite(prnFromFields)) {
         return {
             constellation: normalizeGnssConstellation(code),
@@ -89,11 +97,15 @@ const extractGnssSatelliteIdentity = (output) => {
     }
 
     const satelliteText = String(output.satellite || '');
-    const prnNameMatch = satelliteText.match(/([A-Za-z]+)\s+PRN\s+(\d+)/i);
+    const prnNameMatch = satelliteText.match(/([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)/i);
     if (prnNameMatch) {
+        const parsedPrn = parseGnssPrnValue(prnNameMatch[2]);
+        if (!Number.isFinite(parsedPrn)) {
+            return null;
+        }
         return {
             constellation: normalizeGnssConstellation(prnNameMatch[1]),
-            prn: Number(prnNameMatch[2]),
+            prn: parsedPrn,
         };
     }
 
@@ -102,15 +114,19 @@ const extractGnssSatelliteIdentity = (output) => {
     if (acqMatch) {
         return {
             constellation: normalizeGnssConstellation(acqMatch[1]),
-            prn: Number(acqMatch[2]),
+            prn: parseGnssPrnValue(acqMatch[2]),
         };
     }
 
-    const trackingMatch = message.match(/for satellite\s+([A-Za-z]+)\s+PRN\s+(\d+)/i);
+    const trackingMatch = message.match(/for satellite\s+([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)/i);
     if (trackingMatch) {
+        const parsedPrn = parseGnssPrnValue(trackingMatch[2]);
+        if (!Number.isFinite(parsedPrn)) {
+            return null;
+        }
         return {
             constellation: normalizeGnssConstellation(trackingMatch[1]),
-            prn: Number(trackingMatch[2]),
+            prn: parsedPrn,
         };
     }
 

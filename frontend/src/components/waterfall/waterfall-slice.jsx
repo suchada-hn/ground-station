@@ -285,6 +285,9 @@ const initialState = {
         satnogs: true,
         'gr-satellites': true,
     },
+    // Decoded island UI preferences
+    decodedInsightsActiveTab: 'packets',
+    gnssSatellitesSortModel: [{ field: 'lastSeen', sort: 'desc' }],
 };
 
 // Add these new reducers to your createSlice
@@ -674,6 +677,16 @@ export const waterfallSlice = createSlice({
                 state.showBookmarkSources[source] = value;
             }
         },
+        setDecodedInsightsActiveTab: (state, action) => {
+            state.decodedInsightsActiveTab = action.payload === 'gnss' ? 'gnss' : 'packets';
+        },
+        setGnssSatellitesSortModel: (state, action) => {
+            if (!Array.isArray(action.payload)) {
+                state.gnssSatellitesSortModel = [{ field: 'lastSeen', sort: 'desc' }];
+                return;
+            }
+            state.gnssSatellitesSortModel = action.payload;
+        },
         applySDRConfigParameters: (state, action) => {
             const selectedSDRId = action.payload?.selectedSDRId;
             const data = action.payload?.data;
@@ -798,6 +811,8 @@ export const {
     setNeighboringTransmitters,
     setShowNeighboringTransmitters,
     setShowBookmarkSource,
+    setDecodedInsightsActiveTab,
+    setGnssSatellitesSortModel,
     applySDRConfigParameters,
 } = waterfallSlice.actions;
 

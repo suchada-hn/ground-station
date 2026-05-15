@@ -18,19 +18,26 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Chip, Divider, Typography, useTheme } from '@mui/material';
+import { Box, Chip, Divider, Tooltip, Typography, useTheme } from '@mui/material';
 import { DataGrid, gridClasses } from '@mui/x-data-grid';
-import { shallowEqual, useSelector } from 'react-redux';
+import { alpha } from '@mui/material/styles';
+import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 import {
     AntTab,
     AntTabs,
     getClassNamesBasedOnGridEditing,
+    humanizeFutureDateInMinutes,
     TitleBar,
+    WaterfallStatusBarPaper,
 } from '../common/common.jsx';
 import DecodedPacketsDrawer from './decoded-packets-drawer.jsx';
 import { useSocket } from '../common/socket.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
-import { formatDateTime } from '../../utils/date-time.js';
+import { formatDateTime, formatTime } from '../../utils/date-time.js';
+import {
+    setDecodedInsightsActiveTab,
+    setGnssSatellitesSortModel,
+} from './waterfall-slice.jsx';
 
 const CONSTELLATION_BY_CODE = {
     G: 'GPS',
@@ -39,6 +46,14 @@ const CONSTELLATION_BY_CODE = {
     C: 'BEIDOU',
     B: 'BEIDOU',
     J: 'QZSS',
+};
+
+const CONSTELLATION_OPERATOR_META = {
+    GPS: { flag: '🇺🇸', label: 'United States' },
+    GLONASS: { flag: '🇷🇺', label: 'Russia' },
+    BEIDOU: { flag: '🇨🇳', label: 'China' },
+    QZSS: { flag: '🇯🇵', label: 'Japan' },
+    GALILEO: { flag: '🇪🇺', label: 'European Union' },
 };
 
 function normalizeConstellation(value) {
@@ -54,6 +69,14 @@ function normalizeConstellation(value) {
     if (upper === 'GPS') return 'GPS';
     if (upper === 'QZSS') return 'QZSS';
     return raw;
+}
+
+function parsePrnValue(value) {
+    if (value === null || value === undefined) return null;
+    const match = String(value).toUpperCase().match(/(\d{1,3})/);
+    if (!match) return null;
+    const parsed = Number(match[1]);
+    return Number.isFinite(parsed) ? parsed : null;
 }
 
 function extractChannel(output) {
@@ -72,7 +95,7 @@ function extractSatelliteIdentity(output) {
     if (!output) return null;
 
     const code = String(output.satellite_system || '').trim().toUpperCase();
-    const prnFromFields = Number(output.satellite_prn);
+    const prnFromFields = parsePrnValue(output.satellite_prn);
     if (code && Number.isFinite(prnFromFields)) {
         const constellation = normalizeConstellation(code);
         return {
@@ -82,11 +105,15 @@ function extractSatelliteIdentity(output) {
     }
 
     const satelliteText = String(output.satellite || '');
-    const prnNameMatch = satelliteText.match(/([A-Za-z]+)\s+PRN\s+(\d+)/i);
+    const prnNameMatch = satelliteText.match(/([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)/i);
     if (prnNameMatch) {
+        const parsedPrn = parsePrnValue(prnNameMatch[2]);
+        if (!Number.isFinite(parsedPrn)) {
+            return null;
+        }
         return {
             constellation: normalizeConstellation(prnNameMatch[1]),
-            prn: Number(prnNameMatch[2]),
+            prn: parsedPrn,
         };
     }
 
@@ -95,15 +122,19 @@ function extractSatelliteIdentity(output) {
     if (acqMatch) {
         return {
             constellation: normalizeConstellation(acqMatch[1]),
-            prn: Number(acqMatch[2]),
+            prn: parsePrnValue(acqMatch[2]),
         };
     }
 
-    const trackingMatch = message.match(/for satellite\s+([A-Za-z]+)\s+PRN\s+(\d+)/i);
+    const trackingMatch = message.match(/for satellite\s+([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)/i);
     if (trackingMatch) {
+        const parsedPrn = parsePrnValue(trackingMatch[2]);
+        if (!Number.isFinite(parsedPrn)) {
+            return null;
+        }
         return {
             constellation: normalizeConstellation(trackingMatch[1]),
-            prn: Number(trackingMatch[2]),
+            prn: parsedPrn,
         };
     }
 
@@ -161,22 +192,63 @@ function pickBestSatelliteMatch(candidates, satellite) {
     return scored[0].candidate;
 }
 
+function toFiniteNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getOperatorMetadata(constellation) {
+    return CONSTELLATION_OPERATOR_META[String(constellation || '').toUpperCase()] || null;
+}
+
+const LastSeenFormatter = React.memo(function LastSeenFormatter({ value, nowMs, timezone, locale }) {
+    const relativeTime = useMemo(() => humanizeFutureDateInMinutes(value), [value, nowMs]);
+    const absoluteTime = useMemo(() => formatTime(value, {
+        timezone,
+        locale,
+        options: { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' },
+    }), [value, timezone, locale]);
+
+    return (
+        <Box sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <Typography component="span" variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                {relativeTime}
+            </Typography>
+            <Typography component="span" variant="caption" sx={{ color: 'text.secondary', ml: 0.5 }}>
+                {`· ${absoluteTime}`}
+            </Typography>
+        </Box>
+    );
+});
+
 const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
+    const dispatch = useDispatch();
     const theme = useTheme();
     const { socket } = useSocket();
     const { timezone, locale } = useUserTimeSettings();
     const inflightMatchesRef = useRef(new Set());
-    const [activeTab, setActiveTab] = useState('packets');
     const [selectedSatelliteId, setSelectedSatelliteId] = useState(null);
     const [satelliteMatches, setSatelliteMatches] = useState({});
+    const [relativeNowMs, setRelativeNowMs] = useState(() => Date.now());
 
-    const { outputs, gridEditable } = useSelector(
+    const {
+        outputs,
+        gridEditable,
+        decodedInsightsActiveTab,
+        gnssSatellitesSortModel,
+    } = useSelector(
         (state) => ({
             outputs: state.decoders.outputs,
             gridEditable: state.waterfall.gridEditable,
+            decodedInsightsActiveTab: state.waterfall.decodedInsightsActiveTab,
+            gnssSatellitesSortModel: state.waterfall.gnssSatellitesSortModel,
         }),
         shallowEqual
     );
+    const activeTab = decodedInsightsActiveTab === 'gnss' ? 'gnss' : 'packets';
+    const gnssSortModel = Array.isArray(gnssSatellitesSortModel)
+        ? gnssSatellitesSortModel
+        : [{ field: 'lastSeen', sort: 'desc' }];
 
     const formatTimestamp = useCallback((value) => {
         if (!value) return '-';
@@ -289,11 +361,156 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
         ).length;
     }, [outputs]);
 
+    const packetStatusStats = useMemo(() => {
+        const packetOutputs = outputs.filter(
+            (item) => item?.type === 'decoder-output'
+                && String(item?.decoder_type || '').toLowerCase() !== 'gnss'
+        );
+
+        const decoderTypes = new Set();
+        let latestPacketMs = null;
+        let telemetryCount = 0;
+        let fileOutputCount = 0;
+        let recentPacketCount = 0;
+        const recentWindowStartMs = relativeNowMs - 60_000;
+
+        for (const item of packetOutputs) {
+            const decoderType = String(item?.decoder_type || '').trim().toUpperCase();
+            if (decoderType) {
+                decoderTypes.add(decoderType);
+            }
+
+            if (item?.output?.telemetry) {
+                telemetryCount += 1;
+            }
+            if (item?.output?.filename) {
+                fileOutputCount += 1;
+            }
+
+            const tsMs = Number(item?.timestamp) * 1000;
+            if (Number.isFinite(tsMs)) {
+                latestPacketMs = latestPacketMs === null ? tsMs : Math.max(latestPacketMs, tsMs);
+                if (tsMs >= recentWindowStartMs) {
+                    recentPacketCount += 1;
+                }
+            }
+        }
+
+        return {
+            decoderTypeCount: decoderTypes.size,
+            telemetryCount,
+            fileOutputCount,
+            recentPacketCount,
+            latestPacketMs,
+        };
+    }, [outputs, relativeNowMs]);
+
+    const receiverFix = useMemo(() => {
+        const gnssOutputs = outputs
+            .filter((item) => item?.type === 'decoder-output' && item?.decoder_type === 'gnss')
+            .map((item) => ({
+                timestampMs: Number(item.timestamp) * 1000,
+                output: item.output || {},
+            }))
+            .filter((item) => Number.isFinite(item.timestampMs))
+            .sort((a, b) => b.timestampMs - a.timestampMs);
+
+        const fix = {
+            lastUpdateMs: null,
+            latitude: null,
+            longitude: null,
+            altitudeM: null,
+            fixQuality: null,
+            satellites: null,
+        };
+
+        for (const item of gnssOutputs) {
+            const output = item.output || {};
+            const eventType = String(output.event || '').toLowerCase();
+            const lat = toFiniteNumber(output.latitude);
+            const lon = toFiniteNumber(output.longitude);
+            const alt = toFiniteNumber(output.altitude_m);
+            const sats = toFiniteNumber(output.satellites);
+
+            const isNmea = eventType === 'nmea' || eventType === 'nmea_gga' || eventType === 'nmea_rmc';
+            const hasCoords = lat !== null && lon !== null;
+            if (fix.lastUpdateMs === null && (isNmea || hasCoords)) {
+                fix.lastUpdateMs = item.timestampMs;
+            }
+
+            if (fix.latitude === null && lat !== null) fix.latitude = lat;
+            if (fix.longitude === null && lon !== null) fix.longitude = lon;
+            if (fix.altitudeM === null && alt !== null) fix.altitudeM = alt;
+            if ((fix.fixQuality === null || fix.fixQuality === '') && output.fix_quality !== undefined && output.fix_quality !== null && String(output.fix_quality) !== '') {
+                fix.fixQuality = String(output.fix_quality);
+            }
+            if (fix.satellites === null && sats !== null) fix.satellites = sats;
+
+            if (
+                fix.lastUpdateMs !== null &&
+                fix.latitude !== null &&
+                fix.longitude !== null &&
+                fix.altitudeM !== null &&
+                fix.fixQuality !== null &&
+                fix.satellites !== null
+            ) {
+                break;
+            }
+        }
+
+        const hasCoords = fix.latitude !== null && fix.longitude !== null;
+        const hasFixQuality = fix.fixQuality !== null && fix.fixQuality !== '' && fix.fixQuality !== '0';
+        return {
+            ...fix,
+            status: hasCoords || hasFixQuality ? 'FIX' : (fix.lastUpdateMs ? 'NO FIX' : 'NO DATA'),
+        };
+    }, [outputs]);
+
+    const gnssStatusStats = useMemo(() => {
+        let trackingSatCount = 0;
+        let acquiredSatCount = 0;
+        let lostSatCount = 0;
+        let latestGnssEventMs = null;
+        for (const row of satelliteRows) {
+            if (row.state === 'tracking') trackingSatCount += 1;
+            if (row.state === 'acquired') acquiredSatCount += 1;
+            if (row.state === 'lost') lostSatCount += 1;
+            if (Number.isFinite(row.lastSeen)) {
+                latestGnssEventMs = latestGnssEventMs === null ? row.lastSeen : Math.max(latestGnssEventMs, row.lastSeen);
+            }
+        }
+
+        // Keep a short moving window so operators can quickly tell whether GNSS events
+        // are still arriving without opening detailed logs.
+        const recentWindowStartMs = relativeNowMs - 60_000;
+        const recentEventCount = outputs.filter((item) => {
+            if (item?.type !== 'decoder-output' || item?.decoder_type !== 'gnss') return false;
+            const tsMs = Number(item?.timestamp) * 1000;
+            return Number.isFinite(tsMs) && tsMs >= recentWindowStartMs;
+        }).length;
+
+        return {
+            trackingSatCount,
+            acquiredSatCount,
+            lostSatCount,
+            recentEventCount,
+            latestGnssEventMs,
+        };
+    }, [outputs, relativeNowMs, satelliteRows]);
+
     useEffect(() => {
         if (!selectedSatelliteId || !satelliteRows.find((row) => row.id === selectedSatelliteId)) {
             setSelectedSatelliteId(satelliteRows[0]?.id || null);
         }
     }, [satelliteRows, selectedSatelliteId]);
+
+    useEffect(() => {
+        const interval = window.setInterval(() => {
+            setRelativeNowMs(Date.now());
+        }, 5000);
+
+        return () => window.clearInterval(interval);
+    }, []);
 
     // Resolve unknown GNSS satellites against the local satellite DB incrementally
     // so UI remains responsive even when many rows appear at once.
@@ -362,13 +579,51 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
         {
             field: 'satelliteId',
             headerName: 'Satellite',
-            minWidth: 120,
-            flex: 0.9,
-            renderCell: (params) => (
-                <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
-                    {params.value}
-                </Typography>
-            ),
+            minWidth: 170,
+            flex: 1.1,
+            renderCell: (params) => {
+                const operatorMeta = getOperatorMetadata(params.row?.constellation);
+                const satelliteLabel = params.row?.matchedNorad
+                    ? `${params.value} (${params.row.matchedNorad})`
+                    : params.value;
+
+                return (
+                    <Box
+                        sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 0.6,
+                            minWidth: 0,
+                            width: '100%',
+                            height: '100%',
+                        }}
+                    >
+                        {operatorMeta && (
+                            <Tooltip title={operatorMeta.label}>
+                                <Typography
+                                    component="span"
+                                    variant="caption"
+                                    sx={{ display: 'inline-flex', alignItems: 'center', lineHeight: 1, flexShrink: 0 }}
+                                >
+                                    {operatorMeta.flag}
+                                </Typography>
+                            </Tooltip>
+                        )}
+                        <Typography
+                            variant="caption"
+                            sx={{
+                                fontWeight: 700,
+                                color: 'text.primary',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                            }}
+                        >
+                            {satelliteLabel}
+                        </Typography>
+                    </Box>
+                );
+            },
         },
         {
             field: 'state',
@@ -425,30 +680,13 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
             minWidth: 170,
             flex: 1.2,
             renderCell: (params) => (
-                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    {formatTimestamp(params.value)}
-                </Typography>
+                <LastSeenFormatter
+                    value={params.value}
+                    nowMs={relativeNowMs}
+                    timezone={timezone}
+                    locale={locale}
+                />
             ),
-        },
-        {
-            field: 'matchedNorad',
-            headerName: 'DB Match',
-            minWidth: 160,
-            flex: 1.1,
-            renderCell: (params) => {
-                const row = params.row;
-                if (row.matchStatus === 'loading' || row.matchStatus === 'pending') {
-                    return <Typography variant="caption" sx={{ color: 'text.secondary' }}>Matching...</Typography>;
-                }
-                if (row.matchStatus !== 'matched') {
-                    return <Typography variant="caption" sx={{ color: 'text.disabled' }}>Unmatched</Typography>;
-                }
-                return (
-                    <Typography variant="caption" sx={{ color: 'info.main', fontWeight: 700 }}>
-                        {`${row.matchedName} (${row.matchedNorad})`}
-                    </Typography>
-                );
-            },
         },
         {
             field: 'lastMessage',
@@ -471,7 +709,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                 </Typography>
             ),
         },
-    ]), [formatTimestamp]);
+    ]), [locale, relativeNowMs, timezone]);
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -485,7 +723,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
 
             <AntTabs
                 value={activeTab}
-                onChange={(_, value) => setActiveTab(value)}
+                onChange={(_, value) => dispatch(setDecodedInsightsActiveTab(value))}
                 variant="standard"
                 sx={{
                     px: 1,
@@ -528,7 +766,36 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
 
             <Box sx={{ flex: 1, minHeight: 0, backgroundColor: theme.palette.background.paper }}>
                 {activeTab === 'packets' && (
-                    <DecodedPacketsDrawer embedded />
+                    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                        <Box sx={{ flex: 1, minHeight: 0 }}>
+                            <DecodedPacketsDrawer embedded />
+                        </Box>
+                        <WaterfallStatusBarPaper
+                            elevation={0}
+                            sx={{
+                                height: 28,
+                                minHeight: 28,
+                                borderTop: `1px solid ${theme.palette.border.main}`,
+                                borderBottom: 'none',
+                                px: 1,
+                                gap: 0.65,
+                                flexWrap: 'wrap',
+                                overflow: 'hidden',
+                            }}
+                        >
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                                Packets
+                            </Typography>
+                            <Chip size="small" variant="outlined" label={`Decoded ${packetOutputCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`Decoders ${packetStatusStats.decoderTypeCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`Telemetry ${packetStatusStats.telemetryCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`Files ${packetStatusStats.fileOutputCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`1m ${packetStatusStats.recentPacketCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                                {`Last ${packetStatusStats.latestPacketMs ? formatTimestamp(packetStatusStats.latestPacketMs) : '-'}`}
+                            </Typography>
+                        </WaterfallStatusBarPaper>
+                    </Box>
                 )}
 
                 {activeTab === 'gnss' && (
@@ -538,13 +805,31 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                                 <DataGrid
                                     rows={gnssGridRows}
                                     columns={gnssColumns}
+                                    sortModel={gnssSortModel}
+                                    onSortModelChange={(newSortModel) => dispatch(setGnssSatellitesSortModel(newSortModel))}
                                     density="compact"
                                     disableRowSelectionOnClick
                                     hideFooter
                                     onRowClick={(params) => setSelectedSatelliteId(params.id)}
+                                    getRowClassName={(params) => (
+                                        selectedSatelliteId === params.id ? 'gnss-row-selected' : ''
+                                    )}
                                     localeText={{ noRowsLabel: 'No GNSS satellite events yet' }}
                                     sx={{
                                         border: 0,
+                                        '& .MuiDataGrid-row': {
+                                            borderLeft: '3px solid transparent',
+                                        },
+                                        '& .gnss-row-selected': {
+                                            backgroundColor: alpha(theme.palette.primary.main, 0.2),
+                                            borderLeftColor: theme.palette.primary.main,
+                                            '& .MuiDataGrid-cell': {
+                                                fontWeight: 700,
+                                            },
+                                            '&:hover': {
+                                                backgroundColor: alpha(theme.palette.primary.main, 0.26),
+                                            },
+                                        },
                                         [`& .${gridClasses.cell}:focus, & .${gridClasses.cell}:focus-within`]: {
                                             outline: 'none',
                                         },
@@ -603,6 +888,35 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
 
                                     <Divider sx={{ borderColor: theme.palette.border.main }} />
 
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.55 }}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+                                            <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                                                Receiver Fix
+                                            </Typography>
+                                            <Chip
+                                                size="small"
+                                                color={receiverFix.status === 'FIX' ? 'success' : receiverFix.status === 'NO FIX' ? 'warning' : 'default'}
+                                                variant={receiverFix.status === 'FIX' ? 'filled' : 'outlined'}
+                                                label={receiverFix.status}
+                                                sx={{ height: 18, fontSize: '0.63rem', fontWeight: 700 }}
+                                            />
+                                        </Box>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                            {`Last update: ${receiverFix.lastUpdateMs ? formatTimestamp(receiverFix.lastUpdateMs) : '-'}`}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                            {`Position: ${receiverFix.latitude !== null && receiverFix.longitude !== null ? `${receiverFix.latitude.toFixed(6)}, ${receiverFix.longitude.toFixed(6)}` : '-'}`}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                            {`Altitude: ${receiverFix.altitudeM !== null ? `${receiverFix.altitudeM.toFixed(1)} m` : '-'}`}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                            {`Fix quality: ${receiverFix.fixQuality !== null ? receiverFix.fixQuality : '-'} | Satellites: ${receiverFix.satellites !== null ? receiverFix.satellites : '-'}`}
+                                        </Typography>
+                                    </Box>
+
+                                    <Divider sx={{ borderColor: theme.palette.border.main }} />
+
                                     {!selectedSatellite && (
                                         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                                             Select a satellite row to inspect its latest events.
@@ -648,6 +962,39 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                                 </Box>
                             </Box>
                         </Box>
+                        <WaterfallStatusBarPaper
+                            elevation={0}
+                            sx={{
+                                height: 28,
+                                minHeight: 28,
+                                borderTop: `1px solid ${theme.palette.border.main}`,
+                                borderBottom: 'none',
+                                px: 1,
+                                gap: 0.65,
+                                flexWrap: 'wrap',
+                                overflow: 'hidden',
+                            }}
+                        >
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                                GNSS
+                            </Typography>
+                            <Chip size="small" variant="outlined" label={`Satellites ${satelliteRows.length}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`Tracking ${gnssStatusStats.trackingSatCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`Acquired ${gnssStatusStats.acquiredSatCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`Lost ${gnssStatusStats.lostSatCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`Events ${gnssEventCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip size="small" variant="outlined" label={`1m ${gnssStatusStats.recentEventCount}`} sx={{ height: 18, fontSize: '0.62rem' }} />
+                            <Chip
+                                size="small"
+                                color={receiverFix.status === 'FIX' ? 'success' : receiverFix.status === 'NO FIX' ? 'warning' : 'default'}
+                                variant={receiverFix.status === 'FIX' ? 'filled' : 'outlined'}
+                                label={`Fix ${receiverFix.status}`}
+                                sx={{ height: 18, fontSize: '0.62rem', fontWeight: 700 }}
+                            />
+                            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                                {`Last ${gnssStatusStats.latestGnssEventMs ? formatTimestamp(gnssStatusStats.latestGnssEventMs) : '-'}`}
+                            </Typography>
+                        </WaterfallStatusBarPaper>
                     </Box>
                 )}
             </Box>

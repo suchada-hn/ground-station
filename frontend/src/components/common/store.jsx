@@ -65,6 +65,7 @@ const waterfallPersistConfig = {
         'showLeftSideWaterFallAccessories', 'selectedAntenna', 'selectedSDRId', 'selectedOffsetMode',
         'selectedOffsetValue', 'fftAveraging', 'showRotatorDottedLines', 'autoScalePreset', 'expandedPanels',
         'packetsDrawerHeight', 'packetsDrawerOpen', 'showNeighboringTransmitters', 'showBookmarkSources',
+        'decodedInsightsActiveTab', 'gnssSatellitesSortModel',
         'sdrSettingsById']
 };
 

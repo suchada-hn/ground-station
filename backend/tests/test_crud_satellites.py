@@ -259,6 +259,41 @@ class TestSatellitesCRUD:
         assert result["success"] is True
         assert len(result["data"]) == 2
 
+    async def test_search_satellites_tokenized_prn_phrase(self, db_session):
+        """Tokenized search should match constellation + PRN phrases across separated name tokens."""
+        await add_satellite(
+            db_session,
+            {
+                "name": "GPS BIII-1 (PRN 04)",
+                "sat_id": "GPS-PRN04",
+                "norad_id": 43873,
+                "status": "alive",
+                "is_frequency_violator": False,
+                "tle1": TLE1_TEMPLATE.format(norad=43873),
+                "tle2": TLE2_TEMPLATE.format(norad=43873),
+            },
+        )
+        await add_satellite(
+            db_session,
+            {
+                "name": "GALILEO FOC TEST (PRN 29)",
+                "sat_id": "GAL-PRN29",
+                "norad_id": 99929,
+                "status": "alive",
+                "is_frequency_violator": False,
+                "tle1": TLE1_TEMPLATE.format(norad=99929),
+                "tle2": TLE2_TEMPLATE.format(norad=99929),
+            },
+        )
+
+        gps_result = await search_satellites(db_session, keyword="GPS PRN 04")
+        assert gps_result["success"] is True
+        assert any(sat["norad_id"] == 43873 for sat in gps_result["data"])
+
+        gal_result = await search_satellites(db_session, keyword="Galileo PRN E29")
+        assert gal_result["success"] is True
+        assert any(sat["norad_id"] == 99929 for sat in gal_result["data"])
+
     async def test_search_satellites_all(self, db_session):
         """Test searching all satellites when no keyword provided."""
         await add_satellite(

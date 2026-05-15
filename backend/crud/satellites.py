@@ -14,13 +14,14 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import json
+import re
 import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic.v1 import UUID4
-from sqlalchemy import String, delete, insert, select, update
+from sqlalchemy import String, and_, delete, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -332,14 +333,59 @@ async def search_satellites(session: AsyncSession, keyword: Union[str, int, None
         if keyword is None:
             stmt = select(Satellites)
         else:
-            keyword = str(keyword)
-            keyword = f"%{keyword}%"
-            stmt = select(Satellites).filter(
-                Satellites.norad_id.cast(String).ilike(keyword)
-                | Satellites.name.ilike(keyword)
-                | Satellites.name_other.ilike(keyword)
-                | Satellites.alternative_name.ilike(keyword)
-            )
+            keyword_raw = str(keyword).strip()
+            if not keyword_raw:
+                stmt = select(Satellites)
+            else:
+                # Keep phrase lookup for backwards compatibility, but add tokenized matching
+                # so phrases like "GPS PRN 04" match names such as "GPS ... (PRN 04)".
+                phrase_pattern = f"%{keyword_raw}%"
+                phrase_filter = or_(
+                    Satellites.norad_id.cast(String).ilike(phrase_pattern),
+                    Satellites.name.ilike(phrase_pattern),
+                    Satellites.name_other.ilike(phrase_pattern),
+                    Satellites.alternative_name.ilike(phrase_pattern),
+                )
+
+                raw_tokens = [tok for tok in re.findall(r"[A-Za-z0-9]+", keyword_raw) if tok]
+                token_filters = []
+                for token in raw_tokens:
+                    variants = [token]
+
+                    # Expand compact PRN formats such as E29/J195 so they can match "(PRN 29)".
+                    prn_compact_match = re.fullmatch(r"[A-Za-z](\d{1,3})", token)
+                    if prn_compact_match:
+                        digits = prn_compact_match.group(1)
+                        variants.append(digits)
+                        if len(digits) == 1:
+                            variants.append(digits.zfill(2))
+
+                    if token.isdigit():
+                        stripped = token.lstrip("0")
+                        if stripped and stripped != token:
+                            variants.append(stripped)
+
+                    variant_filters = []
+                    for variant in dict.fromkeys(variants):
+                        pattern = f"%{variant}%"
+                        variant_filters.append(
+                            or_(
+                                Satellites.norad_id.cast(String).ilike(pattern),
+                                Satellites.name.ilike(pattern),
+                                Satellites.name_other.ilike(pattern),
+                                Satellites.alternative_name.ilike(pattern),
+                            )
+                        )
+
+                    if variant_filters:
+                        token_filters.append(or_(*variant_filters))
+
+                if token_filters:
+                    combined_filter = or_(phrase_filter, and_(*token_filters))
+                else:
+                    combined_filter = phrase_filter
+
+                stmt = select(Satellites).filter(combined_filter)
         result = await session.execute(stmt)
         satellites = result.scalars().all()
         satellites = serialize_object(satellites)

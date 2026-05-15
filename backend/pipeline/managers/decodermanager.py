@@ -21,6 +21,8 @@ import signal
 import threading
 import time
 
+import psutil
+
 from common.audio_queue_config import get_audio_queue_config
 from pipeline.config.decoderconfigservice import decoder_config_service
 from pipeline.registries.decoderregistry import decoder_registry
@@ -57,19 +59,31 @@ class DecoderManager:
         """Immediately terminate and SIGKILL a multiprocessing.Process, best-effort join."""
         try:
             pid = getattr(proc, "pid", None)
+            descendant_procs = self._collect_process_descendants(pid)
+            self._terminate_processes(descendant_procs, name, signal_name="SIGTERM")
+
             # Best-effort terminate first
             try:
                 proc.terminate()
             except Exception:
                 pass
+
+            try:
+                proc.join(timeout=0.2)
+            except Exception:
+                pass
+
+            self._kill_survivor_processes(descendant_procs, name)
+
             # Unconditional SIGKILL to guarantee exit
-            if pid:
+            if pid and proc.is_alive():
                 try:
                     os.kill(pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
                 except Exception as e:
                     self.logger.warning(f"Failed to SIGKILL {name} (pid={pid}): {e}")
+
             # Short reap
             try:
                 proc.join(timeout=0.2)
@@ -77,6 +91,57 @@ class DecoderManager:
                 pass
         except Exception as e:
             self.logger.warning(f"Error while force-killing process {name}: {e}")
+
+    def _collect_process_descendants(self, parent_pid):
+        """
+        Capture child processes before forcing the parent down.
+
+        This is required for GNSS: if the decoder gets SIGKILL first, its
+        `gnss-sdr` child can be reparented and outlive the decoder.
+        """
+        if not parent_pid:
+            return []
+        try:
+            return psutil.Process(parent_pid).children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            return []
+        except Exception as e:
+            self.logger.warning(f"Failed to enumerate child processes for pid={parent_pid}: {e}")
+            return []
+
+    def _terminate_processes(self, processes, owner_name: str, signal_name: str) -> None:
+        for child in processes:
+            try:
+                if child.is_running():
+                    child.terminate()
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to send {signal_name} to child pid={child.pid} of {owner_name}: {e}"
+                )
+
+    def _kill_survivor_processes(self, processes, owner_name: str) -> None:
+        if not processes:
+            return
+
+        survivors = []
+        for child in processes:
+            try:
+                if child.is_running():
+                    survivors.append(child)
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+            except Exception:
+                continue
+
+        for child in survivors:
+            try:
+                child.kill()
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+            except Exception as e:
+                self.logger.warning(f"Failed to SIGKILL child pid={child.pid} of {owner_name}: {e}")
 
     def start_decoder(
         self, sdr_id, session_id, decoder_class, data_queue, audio_out_queue=None, **kwargs
@@ -572,8 +637,7 @@ class DecoderManager:
                     self.logger.warning(
                         f"{decoder_name} did not stop gracefully within 5s, terminating forcefully"
                     )
-                    decoder.terminate()
-                    decoder.join(timeout=1.0)
+                    self._force_kill_process(decoder, decoder_name)
                     if decoder.is_alive():
                         self.logger.error(f"{decoder_name} could not be terminated")
                 else:
@@ -726,36 +790,6 @@ class DecoderManager:
             bool: True if restart successful, False otherwise
         """
         try:
-            # Helper: immediately and forcefully kill a decoder process
-            def _force_kill_decoder(decoder_proc, decoder_name: str):
-                try:
-                    pid = getattr(decoder_proc, "pid", None)
-                    # Try terminate first (best effort)
-                    try:
-                        decoder_proc.terminate()
-                    except Exception:
-                        pass
-
-                    # Immediate SIGKILL to guarantee exit
-                    if pid:
-                        try:
-                            os.kill(pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            # Already gone
-                            pass
-                        except Exception as e:
-                            self.logger.warning(
-                                f"Failed to SIGKILL {decoder_name} (pid={pid}): {e}"
-                            )
-
-                    # Best-effort short join to reap the process
-                    try:
-                        decoder_proc.join(timeout=0.2)
-                    except Exception:
-                        pass
-                except Exception as e:
-                    self.logger.warning(f"Error while force-killing decoder {decoder_name}: {e}")
-
             # Extract configuration from decoder entry
             decoder_config = decoder_entry.get("config")
             if not decoder_config:
@@ -810,7 +844,7 @@ class DecoderManager:
                     self.logger.warning(
                         f"Force-killing existing decoder for {session_id} VFO{vfo_number} before restart"
                     )
-                    _force_kill_decoder(dec_instance, dec_name)
+                    self._force_kill_process(dec_instance, dec_name)
 
                     # Perform resource cleanup similar to graceful stop to avoid stale subscriptions
                     try:

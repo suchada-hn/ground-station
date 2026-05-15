@@ -8,6 +8,7 @@ import os
 import queue
 import re
 import shutil
+import signal as py_signal
 import subprocess
 import tempfile
 import threading
@@ -19,7 +20,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import psutil
 import setproctitle
-from scipy import signal
+from scipy import signal as sp_signal
 
 from demodulators.basedecoderprocess import BaseDecoderProcess
 from telemetry.parser import TelemetryParser
@@ -330,7 +331,7 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         transition = max(50_000.0, cutoff * 0.1)
         numtaps = int(sample_rate / transition) | 1
         numtaps = min(numtaps, 1001)
-        return signal.firwin(numtaps, cutoff, fs=sample_rate)
+        return sp_signal.firwin(numtaps, cutoff, fs=sample_rate)
 
     def _configure_sample_rate_path(self, sdr_rate: float, vfo_bandwidth: float) -> None:
         # Prefer an integer decimation path for predictable, low-overhead runtime behavior.
@@ -355,7 +356,7 @@ class GNSSSdrDecoder(BaseDecoderProcess):
     def _decimate_iq(self, samples: np.ndarray) -> np.ndarray:
         if self.decimation_factor <= 1:
             return samples
-        filtered = signal.lfilter(self.decimation_filter, 1, samples)
+        filtered = sp_signal.lfilter(self.decimation_filter, 1, samples)
         return filtered[:: self.decimation_factor]
 
     def _enabled_signal_ids(self):
@@ -585,8 +586,35 @@ class GNSSSdrDecoder(BaseDecoderProcess):
             line,
         )
         if pull_in_match:
-            parsed["satellite"] = pull_in_match.group(1).strip()
+            satellite_desc = pull_in_match.group(1).strip()
+            parsed["satellite"] = satellite_desc
             parsed["channel"] = int(pull_in_match.group(2))
+
+            # Normalize known tracking line formats:
+            #   "GPS PRN 04 ..."
+            #   "Galileo PRN E29 ..."
+            #   "QZSS PRN 195 ..."
+            tracking_sat_match = re.search(
+                r"([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)",
+                satellite_desc,
+            )
+            if tracking_sat_match:
+                system_name = tracking_sat_match.group(1).strip().upper()
+                prn_token = tracking_sat_match.group(2).strip().upper()
+                prn_match = re.search(r"(\d+)", prn_token)
+                if prn_match:
+                    parsed["satellite_prn"] = int(prn_match.group(1))
+
+                system_map = {
+                    "GPS": "G",
+                    "GALILEO": "E",
+                    "GLONASS": "R",
+                    "BEIDOU": "C",
+                    "BDS": "C",
+                    "QZSS": "J",
+                }
+                if system_name in system_map:
+                    parsed["satellite_system"] = system_map[system_name]
 
         return parsed
 
@@ -747,19 +775,64 @@ class GNSSSdrDecoder(BaseDecoderProcess):
             self.fifo_fd = None
 
         if self.gnss_process:
-            try:
-                self.gnss_process.terminate()
-                self.gnss_process.wait(timeout=5)
-            except Exception:
-                try:
-                    self.gnss_process.kill()
-                except Exception:
-                    pass
+            self._stop_gnss_process()
             self.gnss_process = None
 
         if self.runtime_dir and os.path.isdir(self.runtime_dir):
             shutil.rmtree(self.runtime_dir, ignore_errors=True)
             self.runtime_dir = None
+
+    def _stop_gnss_process(self) -> None:
+        """
+        Stop `gnss-sdr` and any children it may have spawned.
+
+        `start_new_session=True` gives the process its own group, so we can
+        terminate/kill the entire GNSS subtree in one call.
+        """
+        if not self.gnss_process:
+            return
+
+        proc = self.gnss_process
+        pid = getattr(proc, "pid", None)
+
+        if pid:
+            try:
+                os.killpg(pid, py_signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+        else:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            if pid:
+                try:
+                    os.killpg(pid, py_signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+            else:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            try:
+                proc.wait(timeout=1)
+            except Exception:
+                pass
 
     def run(self):
         setproctitle.setproctitle(f"Ground Station - GNSS Decoder (VFO {self.vfo})")
@@ -828,6 +901,7 @@ class GNSSSdrDecoder(BaseDecoderProcess):
                 universal_newlines=True,
                 bufsize=1,
                 cwd=self.runtime_dir,
+                start_new_session=True,
             )
             self.gnss_stdout_thread = threading.Thread(
                 target=self._read_gnss_stdout, daemon=True, name=f"gnss-sdr-log-{self.vfo}"
