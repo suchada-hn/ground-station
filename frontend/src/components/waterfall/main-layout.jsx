@@ -44,7 +44,7 @@ export const handleSetGridEditableWaterfall = function (value) {
 };
 
 export const gridLayoutStoreName = 'waterfall-view-layouts';
-const LAYOUT_SCHEMA_VERSION = 5;
+const LAYOUT_SCHEMA_VERSION = 6;
 const SHARED_RESIZE_HANDLES = ['s', 'sw', 'w', 'se', 'nw', 'ne', 'e'];
 
 // load / save layouts from localStorage
@@ -119,7 +119,7 @@ const MainLayout = React.memo(function MainLayout() {
             "x": 0,
             "y": 0,
             "w": 10,
-            "h": 20,
+            "h": 19,
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
@@ -128,16 +128,16 @@ const MainLayout = React.memo(function MainLayout() {
             "x": 10,
             "y": 0,
             "w": 2,
-            "h": 27,
+            "h": 19,
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
         }, {
             "i": "decoding",
             "x": 0,
-            "y": 20,
-            "w": 10,
-            "h": 7,
+            "y": 19,
+            "w": 12,
+            "h": 8,
             "moved": false,
             "static": false,
             "resizeHandles": ["s", "sw", "w", "se", "nw", "ne", "e"]
