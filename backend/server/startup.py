@@ -33,6 +33,7 @@ from server import runtimestate, shutdown
 from server.firsttime import first_time_initialization, run_initial_sync
 from server.scheduler import run_initial_observation_generation, start_scheduler, stop_scheduler
 from server.sessionsnapshot import start_session_runtime_emitter
+from server.spapaths import is_static_asset_request, resolve_static_asset_path
 from server.systeminfo import start_system_info_emitter
 from server.version import get_full_version_info, get_update_check
 from tasks.manager import BackgroundTaskManager
@@ -321,9 +322,17 @@ async def download_decoded_folder(foldername: str, background_tasks: BackgroundT
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
     static_files_dir = os.environ.get("STATIC_FILES_DIR", "../../frontend/dist")
-    if full_path.startswith(("static/", "assets/", "favicon.ico")):
-        return FileResponse(os.path.join(static_files_dir, full_path))
-    return FileResponse(os.path.join(static_files_dir, "index.html"))
+    base_dir = Path(static_files_dir).resolve()
+
+    if is_static_asset_request(full_path):
+        # Normalize and enforce containment to prevent path traversal.
+        try:
+            file_path = resolve_static_asset_path(base_dir, full_path)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid path")
+        return FileResponse(str(file_path))
+
+    return FileResponse(str(base_dir / "index.html"))
 
 
 async def init_db():
