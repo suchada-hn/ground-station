@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 
 import crud
+from celestial.bodycatalog import get_celestial_body
 from common.arguments import arguments
 from common.constants import (
     RigStates,
@@ -96,6 +97,31 @@ def _infer_target_type_from_value(value: Dict[str, Any]) -> str:
     return ""
 
 
+def _resolve_body_display_name(body_id: Any) -> str:
+    normalized_body_id = str(body_id or "").strip().lower()
+    if not normalized_body_id:
+        return ""
+    body = get_celestial_body(normalized_body_id) or {}
+    display_name = str(body.get("name") or "").strip()
+    return display_name or normalized_body_id
+
+
+def _resolve_non_satellite_target_name(tracking_value: Dict[str, Any], target_type: str) -> str:
+    explicit_name = str(tracking_value.get("target_name") or "").strip()
+    if explicit_name:
+        if target_type == "body":
+            normalized_body_id = str(tracking_value.get("body_id") or "").strip().lower()
+            if normalized_body_id and explicit_name.lower() == normalized_body_id:
+                return _resolve_body_display_name(normalized_body_id) or explicit_name
+        return explicit_name
+    if target_type == "mission":
+        command = str(tracking_value.get("command") or "").strip()
+        return command or "mission"
+    if target_type == "body":
+        return _resolve_body_display_name(tracking_value.get("body_id")) or "body"
+    return str(target_type or "").strip() or "target"
+
+
 def _normalize_target_update_payload(value: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(value or {})
     target_type = _infer_target_type_from_value(payload)
@@ -120,6 +146,8 @@ def _normalize_target_update_payload(value: Dict[str, Any]) -> Dict[str, Any]:
                 "message": "command is required for mission targets",
             }
         payload["command"] = command
+        payload_target_name = str(payload.get("target_name") or "").strip()
+        payload["target_name"] = payload_target_name or command
         payload["body_id"] = None
         payload["norad_id"] = None
         payload["group_id"] = None
@@ -134,6 +162,14 @@ def _normalize_target_update_payload(value: Dict[str, Any]) -> Dict[str, Any]:
                 "message": "body_id is required for body targets",
             }
         payload["body_id"] = body_id
+        payload_target_name = str(payload.get("target_name") or "").strip()
+        canonical_body_name = _resolve_body_display_name(body_id)
+        # Normalize identifier-only names (e.g. "rhea") to canonical display
+        # names so mount-time and live tracker emissions stay visually stable.
+        if not payload_target_name or payload_target_name.lower() == body_id:
+            payload["target_name"] = canonical_body_name or body_id
+        else:
+            payload["target_name"] = payload_target_name
         payload["command"] = None
         payload["norad_id"] = None
         payload["group_id"] = None
@@ -203,12 +239,7 @@ async def emit_tracker_data(dbsession, sio, logger, tracker_id: str):
             norad_id = tracking_value.get("norad_id", None)
             satellite_data = await compiled_satellite_data(dbsession, norad_id)
         else:
-            target_name = str(
-                tracking_value.get("target_name")
-                or tracking_value.get("command")
-                or tracking_value.get("body_id")
-                or target_type
-            ).strip()
+            target_name = _resolve_non_satellite_target_name(tracking_value, target_type)
             satellite_data = {
                 "details": {
                     "name": target_name,
