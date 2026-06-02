@@ -69,9 +69,22 @@ import {getSunMoonCoords} from '../common/sunmoon.jsx';
 import {useSocket} from '../common/socket.jsx';
 import {store} from '../common/store.jsx';
 import {CircularProgress, Backdrop} from '@mui/material';
+import {pickTooltipDirection} from '../common/tooltip-orientation.js';
 
 const viewSatelliteLimit = 100;
 const MAPLIBRE_MIN_ZOOM = -6;
+const MAPLIBRE_TOOLTIP_DIRECTIONS = Object.freeze(['bottom', 'right', 'left', 'top']);
+const MAPLIBRE_TOOLTIP_DEFAULT_SIZE = Object.freeze({width: 220, height: 48});
+const MAPLIBRE_TOOLTIP_ANCHOR_DISTANCE = 15;
+const MAPLIBRE_TOOLTIP_EDGE_PADDING = 10;
+// MapLibre anchor names describe which popup edge is connected to the marker, so the
+// value is the inverse of Leaflet tooltip direction names (which describe where it appears).
+const MAPLIBRE_ANCHOR_BY_TOOLTIP_DIRECTION = Object.freeze({
+    top: 'bottom',
+    right: 'left',
+    left: 'right',
+    bottom: 'top',
+});
 
 const DATE_LINE_GEOJSON = {
     type: 'FeatureCollection',
@@ -219,6 +232,101 @@ const OverviewAttributionBar = React.memo(function OverviewAttributionBar({htmlS
         <MapStatusBar>
             <SimpleTruncatedHtml className={'attribution'} htmlString={htmlString}/>
         </MapStatusBar>
+    );
+});
+
+const MapLibreSatellitePopup = React.memo(function MapLibreSatellitePopup({
+    map,
+    popupId,
+    longitude,
+    latitude,
+    className,
+    children,
+}) {
+    const popupRef = useRef(null);
+    const [tooltipDirection, setTooltipDirection] = useState(MAPLIBRE_TOOLTIP_DIRECTIONS[0]);
+
+    const updateTooltipOrientation = useCallback(() => {
+        if (!map) return;
+        const projectedPoint = map.project([longitude, latitude]);
+        const mapCanvas = map.getCanvas();
+        const mapWidth = Number(mapCanvas?.clientWidth);
+        const mapHeight = Number(mapCanvas?.clientHeight);
+        if (!Number.isFinite(projectedPoint?.x) || !Number.isFinite(projectedPoint?.y)) return;
+        if (!Number.isFinite(mapWidth) || !Number.isFinite(mapHeight) || mapWidth <= 0 || mapHeight <= 0) return;
+
+        const popupContentElement = popupRef.current?.getElement?.()?.querySelector?.('.maplibregl-popup-content');
+        const tooltipSize = popupContentElement
+            ? {width: popupContentElement.offsetWidth, height: popupContentElement.offsetHeight}
+            : MAPLIBRE_TOOLTIP_DEFAULT_SIZE;
+
+        const nextDirection = pickTooltipDirection({
+            anchorPoint: {x: projectedPoint.x, y: projectedPoint.y},
+            mapSize: {x: mapWidth, y: mapHeight},
+            tooltipSize,
+            preferredDirections: MAPLIBRE_TOOLTIP_DIRECTIONS,
+            anchorDistance: MAPLIBRE_TOOLTIP_ANCHOR_DISTANCE,
+            edgePadding: MAPLIBRE_TOOLTIP_EDGE_PADDING,
+        });
+        setTooltipDirection((currentDirection) => (
+            currentDirection === nextDirection ? currentDirection : nextDirection
+        ));
+    }, [latitude, longitude, map]);
+
+    useEffect(() => {
+        if (!map) return undefined;
+        let animationFrameId = requestAnimationFrame(updateTooltipOrientation);
+        const scheduleUpdate = () => {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = requestAnimationFrame(updateTooltipOrientation);
+        };
+
+        map.on('moveend', scheduleUpdate);
+        map.on('zoomend', scheduleUpdate);
+        map.on('resize', scheduleUpdate);
+        return () => {
+            cancelAnimationFrame(animationFrameId);
+            map.off('moveend', scheduleUpdate);
+            map.off('zoomend', scheduleUpdate);
+            map.off('resize', scheduleUpdate);
+        };
+    }, [map, updateTooltipOrientation]);
+
+    useEffect(() => {
+        const animationFrameId = requestAnimationFrame(updateTooltipOrientation);
+        return () => cancelAnimationFrame(animationFrameId);
+    }, [children, updateTooltipOrientation]);
+
+    useEffect(() => {
+        const popupContentElement = popupRef.current?.getElement?.()?.querySelector?.('.maplibregl-popup-content');
+        if (!popupContentElement || typeof ResizeObserver === 'undefined') {
+            return undefined;
+        }
+
+        const resizeObserver = new ResizeObserver(() => {
+            updateTooltipOrientation();
+        });
+        resizeObserver.observe(popupContentElement);
+        return () => resizeObserver.disconnect();
+    }, [tooltipDirection, updateTooltipOrientation]);
+
+    const tooltipAnchor = MAPLIBRE_ANCHOR_BY_TOOLTIP_DIRECTION[tooltipDirection] || 'top';
+
+    return (
+        <Popup
+            ref={popupRef}
+            key={`overview-maplibre-popup-${popupId}-${tooltipDirection}`}
+            longitude={longitude}
+            latitude={latitude}
+            maxWidth="none"
+            closeButton={false}
+            closeOnClick={false}
+            anchor={tooltipAnchor}
+            offset={MAPLIBRE_TOOLTIP_ANCHOR_DISTANCE}
+            className={className}
+        >
+            {children}
+        </Popup>
     );
 });
 
@@ -1029,14 +1137,11 @@ const MapLibreOverviewMapRenderer = ({handleSetTrackingOnBackend}) => {
                                 </Marker>
 
                                 {shouldShowPopup ? (
-                                    <Popup
+                                    <MapLibreSatellitePopup
+                                        map={liveMap}
+                                        popupId={marker.noradId}
                                         longitude={marker.lon}
                                         latitude={marker.lat}
-                                        maxWidth="none"
-                                        closeButton={false}
-                                        closeOnClick={false}
-                                        anchor="top"
-                                        offset={10}
                                         className={marker.isTracked ? 'overview-maplibre-tracked-popup' : 'overview-maplibre-popup'}
                                     >
                                         <Box sx={{display: 'flex', flexDirection: 'column', gap: 0.5}}>
@@ -1097,7 +1202,7 @@ const MapLibreOverviewMapRenderer = ({handleSetTrackingOnBackend}) => {
                                                 </Box>
                                             ) : null}
                                         </Box>
-                                    </Popup>
+                                    </MapLibreSatellitePopup>
                                 ) : null}
                             </React.Fragment>
                         );

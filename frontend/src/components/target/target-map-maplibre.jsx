@@ -64,10 +64,23 @@ import {
     satellitePathsSelector,
     satellitePositionSelector,
 } from './state-selectors.jsx';
+import {pickTooltipDirection} from '../common/tooltip-orientation.js';
 
 const storageMapZoomValueKey = 'target-map-zoom-level';
 const TARGET_SLOT_ID_PATTERN = /^target-(\d+)$/;
 const MAPLIBRE_MIN_ZOOM = -6;
+const MAPLIBRE_TOOLTIP_DIRECTIONS = Object.freeze(['bottom', 'right', 'left', 'top']);
+const MAPLIBRE_TOOLTIP_DEFAULT_SIZE = Object.freeze({width: 220, height: 48});
+const MAPLIBRE_TOOLTIP_ANCHOR_DISTANCE = 15;
+const MAPLIBRE_TOOLTIP_EDGE_PADDING = 10;
+// MapLibre anchor names describe the popup side attached to the point, so they are inverse
+// of Leaflet's tooltip direction names (which describe where the tooltip appears).
+const MAPLIBRE_ANCHOR_BY_TOOLTIP_DIRECTION = Object.freeze({
+    top: 'bottom',
+    right: 'left',
+    left: 'right',
+    bottom: 'top',
+});
 
 const DATE_LINE_GEOJSON = {
     type: 'FeatureCollection',
@@ -264,6 +277,7 @@ const TargetMapMapLibreRenderer = () => {
     const {location} = useSelector((state) => state.location);
 
     const mapRef = useRef(null);
+    const popupRef = useRef(null);
     const normalizedMapEngine = useMemo(
         () => normalizeMapEngine(mapEngine),
         [mapEngine]
@@ -451,6 +465,7 @@ const TargetMapMapLibreRenderer = () => {
     }, [skyState.daySidePolygon]);
 
     const liveMap = mapRef.current?.getMap();
+    const [tooltipDirection, setTooltipDirection] = useState(MAPLIBRE_TOOLTIP_DIRECTIONS[0]);
 
     useEffect(() => {
         if (!liveMap || !lockOnTarget) return;
@@ -473,6 +488,63 @@ const TargetMapMapLibreRenderer = () => {
 
         liveMap.flyTo({center: [lon, lat], zoom: liveMap.getZoom(), animate: false});
     }, [liveMap, lockOnTarget, satelliteCoverage, satellitePosition?.lat, satellitePosition?.lon, showSatelliteCoverage]);
+
+    const updateTooltipOrientation = useCallback(() => {
+        if (!liveMap || !showTooltip || !hasSatellitePosition) return;
+        const projectedPoint = liveMap.project([satelliteLon, satelliteLat]);
+        const mapCanvas = liveMap.getCanvas();
+        const mapWidth = Number(mapCanvas?.clientWidth);
+        const mapHeight = Number(mapCanvas?.clientHeight);
+        if (!Number.isFinite(projectedPoint?.x) || !Number.isFinite(projectedPoint?.y)) return;
+        if (!Number.isFinite(mapWidth) || !Number.isFinite(mapHeight) || mapWidth <= 0 || mapHeight <= 0) return;
+
+        const popupContentElement = popupRef.current?.getElement?.()?.querySelector?.('.maplibregl-popup-content');
+        const tooltipSize = popupContentElement
+            ? {width: popupContentElement.offsetWidth, height: popupContentElement.offsetHeight}
+            : MAPLIBRE_TOOLTIP_DEFAULT_SIZE;
+
+        const nextDirection = pickTooltipDirection({
+            anchorPoint: {x: projectedPoint.x, y: projectedPoint.y},
+            mapSize: {x: mapWidth, y: mapHeight},
+            tooltipSize,
+            preferredDirections: MAPLIBRE_TOOLTIP_DIRECTIONS,
+            anchorDistance: MAPLIBRE_TOOLTIP_ANCHOR_DISTANCE,
+            edgePadding: MAPLIBRE_TOOLTIP_EDGE_PADDING,
+        });
+        setTooltipDirection((currentDirection) => (
+            currentDirection === nextDirection ? currentDirection : nextDirection
+        ));
+    }, [hasSatellitePosition, liveMap, satelliteLat, satelliteLon, showTooltip]);
+
+    useEffect(() => {
+        if (!liveMap || !showTooltip || !hasSatellitePosition) return undefined;
+        let animationFrameId = requestAnimationFrame(updateTooltipOrientation);
+        const scheduleUpdate = () => {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = requestAnimationFrame(updateTooltipOrientation);
+        };
+
+        liveMap.on('moveend', scheduleUpdate);
+        liveMap.on('zoomend', scheduleUpdate);
+        liveMap.on('resize', scheduleUpdate);
+        return () => {
+            cancelAnimationFrame(animationFrameId);
+            liveMap.off('moveend', scheduleUpdate);
+            liveMap.off('zoomend', scheduleUpdate);
+            liveMap.off('resize', scheduleUpdate);
+        };
+    }, [hasSatellitePosition, liveMap, showTooltip, updateTooltipOrientation]);
+
+    useEffect(() => {
+        if (!showTooltip || !hasSatellitePosition) {
+            setTooltipDirection(MAPLIBRE_TOOLTIP_DIRECTIONS[0]);
+            return;
+        }
+        const animationFrameId = requestAnimationFrame(updateTooltipOrientation);
+        return () => cancelAnimationFrame(animationFrameId);
+    }, [hasSatellitePosition, showTooltip, updateTooltipOrientation]);
+
+    const tooltipAnchor = MAPLIBRE_ANCHOR_BY_TOOLTIP_DIRECTION[tooltipDirection] || 'top';
 
     const handleCenterHome = () => {
         if (!liveMap || !location) return;
@@ -779,13 +851,15 @@ const TargetMapMapLibreRenderer = () => {
 
                     {showTooltip && hasSatellitePosition ? (
                         <Popup
+                            ref={popupRef}
+                            key={`target-maplibre-popup-${tooltipDirection}`}
                             longitude={satelliteLon}
                             latitude={satelliteLat}
                             maxWidth="none"
                             closeButton={false}
                             closeOnClick={false}
-                            anchor="top"
-                            offset={10}
+                            anchor={tooltipAnchor}
+                            offset={MAPLIBRE_TOOLTIP_ANCHOR_DISTANCE}
                             className="target-maplibre-popup"
                         >
                             <strong>
