@@ -853,7 +853,18 @@ const MapLibreOverviewMapRenderer = ({handleSetTrackingOnBackend}) => {
                     '& .maplibregl-ctrl-attrib, & .maplibregl-ctrl-bottom-right': {
                         display: 'none !important',
                     },
-                    '& .overview-maplibre-popup .maplibregl-popup-content, & .overview-maplibre-tracked-popup .maplibregl-popup-content': {
+                    // Match Leaflet selected-satellite tooltip style for non-tracked targets.
+                    '& .overview-maplibre-popup .maplibregl-popup-content': {
+                        backgroundColor: theme.palette.background.paper,
+                        color: theme.palette.text.primary,
+                        border: `1px solid ${theme.palette.background.paper}`,
+                        boxShadow: theme.shadows[3],
+                        borderRadius: `${theme.shape.borderRadius}px`,
+                        whiteSpace: 'nowrap',
+                        padding: '6px 8px',
+                    },
+                    // Match Leaflet tracked-satellite tooltip style.
+                    '& .overview-maplibre-tracked-popup .maplibregl-popup-content': {
                         backgroundColor: theme.palette.error.dark,
                         color: theme.palette.text.primary,
                         border: `1px solid ${theme.palette.error.main}`,
@@ -862,16 +873,28 @@ const MapLibreOverviewMapRenderer = ({handleSetTrackingOnBackend}) => {
                         whiteSpace: 'nowrap',
                         padding: '6px 8px',
                     },
-                    '& .overview-maplibre-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip, & .overview-maplibre-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip, & .overview-maplibre-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip': {
+                    '& .overview-maplibre-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip, & .overview-maplibre-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip, & .overview-maplibre-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip': {
+                        borderBottomColor: `${theme.palette.background.paper} !important`,
+                    },
+                    '& .overview-maplibre-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip, & .overview-maplibre-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip, & .overview-maplibre-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip': {
+                        borderTopColor: `${theme.palette.background.paper} !important`,
+                    },
+                    '& .overview-maplibre-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip': {
+                        borderRightColor: `${theme.palette.background.paper} !important`,
+                    },
+                    '& .overview-maplibre-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip': {
+                        borderLeftColor: `${theme.palette.background.paper} !important`,
+                    },
+                    '& .overview-maplibre-tracked-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip': {
                         borderBottomColor: `${theme.palette.error.main} !important`,
                     },
-                    '& .overview-maplibre-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip, & .overview-maplibre-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip, & .overview-maplibre-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip': {
+                    '& .overview-maplibre-tracked-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip': {
                         borderTopColor: `${theme.palette.error.main} !important`,
                     },
-                    '& .overview-maplibre-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip': {
+                    '& .overview-maplibre-tracked-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip': {
                         borderRightColor: `${theme.palette.error.main} !important`,
                     },
-                    '& .overview-maplibre-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip, & .overview-maplibre-tracked-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip': {
+                    '& .overview-maplibre-tracked-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip': {
                         borderLeftColor: `${theme.palette.error.main} !important`,
                     },
                 }}
