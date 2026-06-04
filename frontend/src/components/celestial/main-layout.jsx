@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
     Box,
+    CircularProgress,
     IconButton,
     Tooltip,
     Typography,
@@ -44,13 +45,16 @@ const SHARED_RESIZE_HANDLES = ['s', 'sw', 'w', 'se', 'nw', 'ne', 'e'];
 const DEFAULT_PAST_HOURS = 0;
 const DEFAULT_FUTURE_HOURS = 24;
 const DEFAULT_STEP_MINUTES = 60;
+const MAX_PROJECTION_HOURS = 4320;
 const parseNonNegativeNumber = (value, fallback) => {
     const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+    if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+    return Math.min(parsed, MAX_PROJECTION_HOURS);
 };
 const parsePositiveNumber = (value, fallback) => {
     const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.min(parsed, MAX_PROJECTION_HOURS);
 };
 const buildTargetKey = (row) => {
     const explicitKey = String(row?.targetKey || row?.target_key || '').trim();
@@ -242,6 +246,7 @@ const CelestialMainLayout = () => {
     const [zoomInSignal, setZoomInSignal] = useState(0);
     const [zoomOutSignal, setZoomOutSignal] = useState(0);
     const [resetZoomSignal, setResetZoomSignal] = useState(0);
+    const [centerSunSignal, setCenterSunSignal] = useState(0);
     const [openSolarSystemLayoutOptionsDialog, setOpenSolarSystemLayoutOptionsDialog] = useState(false);
 
     const projectionSettings = React.useMemo(() => {
@@ -350,6 +355,9 @@ const CelestialMainLayout = () => {
         : inferredCounts.moons;
     const trackedCount = combinedScene?.celestial?.length || 0;
     const hasSolarScene = (planetsCount + moonsCount) > 0;
+    const solarLoading = Boolean(celestialState?.solarLoading);
+    const isSolarInitialLoad = solarLoading && !hasSolarScene;
+    const isSolarRefreshing = solarLoading && hasSolarScene;
     const selectedInfoTargetKey = React.useMemo(() => {
         const focusedKey = String(focusTargetKey || '').trim();
         if (focusedKey) {
@@ -420,6 +428,7 @@ const CelestialMainLayout = () => {
                     onZoomIn={() => setZoomInSignal((value) => value + 1)}
                     onZoomOut={() => setZoomOutSignal((value) => value + 1)}
                     onZoomReset={() => setResetZoomSignal((value) => value + 1)}
+                    onCenterSun={() => setCenterSunSignal((value) => value + 1)}
                     onRefresh={handleRefreshCelestial}
                     loading={celestialState.tracksLoading}
                     loadingText={tracksProgressText}
@@ -431,7 +440,7 @@ const CelestialMainLayout = () => {
                             {celestialState.error}
                         </Typography>
                     ) : (
-                        <Box sx={{ height: '100%', minHeight: 220 }}>
+                        <Box sx={{ height: '100%', minHeight: 220, position: 'relative' }}>
                             <SolarSystemCanvas
                                 scene={combinedScene}
                                 selectedTargetKeys={selectedTargetKeys}
@@ -441,10 +450,63 @@ const CelestialMainLayout = () => {
                                 zoomInSignal={zoomInSignal}
                                 zoomOutSignal={zoomOutSignal}
                                 resetZoomSignal={resetZoomSignal}
+                                centerSunSignal={centerSunSignal}
                                 initialViewport={celestialState.mapSettings?.solarSystemViewport}
                                 onViewportCommit={handleViewportCommit}
                                 displayOptions={solarSystemDisplayOptions}
                             />
+
+                            {isSolarInitialLoad ? (
+                                <Box
+                                    sx={{
+                                        position: 'absolute',
+                                        inset: 0,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        flexDirection: 'column',
+                                        gap: 1.25,
+                                        bgcolor: (theme) => theme.palette.mode === 'dark'
+                                            ? 'rgba(8, 10, 14, 0.72)'
+                                            : 'rgba(248, 250, 255, 0.78)',
+                                    }}
+                                >
+                                    <CircularProgress size={34} />
+                                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                                        Loading solar system vectors...
+                                    </Typography>
+                                </Box>
+                            ) : null}
+
+                            {isSolarRefreshing ? (
+                                <Box
+                                    sx={{
+                                        position: 'absolute',
+                                        top: 8,
+                                        right: 10,
+                                        px: 0.9,
+                                        py: 0.45,
+                                        borderRadius: 1,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 0.75,
+                                        bgcolor: (theme) => theme.palette.mode === 'dark'
+                                            ? 'rgba(12, 16, 22, 0.64)'
+                                            : 'rgba(255, 255, 255, 0.8)',
+                                        border: (theme) => `1px solid ${theme.palette.divider}`,
+                                        backdropFilter: 'blur(4px)',
+                                    }}
+                                >
+                                    <CircularProgress size={12} thickness={6} />
+                                    <Typography
+                                        variant="caption"
+                                        color="text.secondary"
+                                        sx={{ fontFamily: 'monospace', lineHeight: 1 }}
+                                    >
+                                        Updating...
+                                    </Typography>
+                                </Box>
+                            ) : null}
                         </Box>
                     )}
                 </Box>

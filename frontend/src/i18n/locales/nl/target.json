@@ -129,7 +129,7 @@
     "sunrise": "Zonsopgang",
     "sunset": "Zonsondergang",
     "now": "NU",
-    "noPassesAvailable": "Geen satellietpassages beschikbaar",
+    "noPassesAvailable": "Geen passages beschikbaar",
     "noPassesForSelected": "Geen passages voor de geselecteerde {{hours}} uur",
     "active": "ACTIEF",
     "start": "Start",

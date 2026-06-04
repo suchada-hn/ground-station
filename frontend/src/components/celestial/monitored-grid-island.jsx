@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { DataGrid, gridClasses } from '@mui/x-data-grid';
 import { alpha, styled } from '@mui/material/styles';
 import {
@@ -371,6 +371,15 @@ const MonitoredCelestialGridIsland = ({
             }),
         [rows, trackByTargetKey, nowMs],
     );
+    const applyTargetSelection = useCallback((rawId) => {
+        if (rawId == null) return;
+        const selectedRow = enrichedRows.find((row) => String(row.id) === String(rawId));
+        if (!selectedRow) return;
+        dispatch(setSelectedMonitoredIds([selectedRow.id]));
+        if (onTargetSelected) {
+            onTargetSelected(selectedRow);
+        }
+    }, [dispatch, enrichedRows, onTargetSelected]);
 
     const columns = useMemo(
         () => [
@@ -522,13 +531,15 @@ const MonitoredCelestialGridIsland = ({
                     onRowSelectionModelChange={(nextSelection) => {
                         const selected = toSelectedIds(nextSelection);
                         const selectedId = selected.length ? selected[0] : null;
-                        dispatch(setSelectedMonitoredIds(selectedId ? [selectedId] : []));
-                        if (selectedId && onTargetSelected) {
-                            const selectedRow = enrichedRows.find((row) => row.id === selectedId);
-                            if (selectedRow) {
-                                onTargetSelected(selectedRow);
-                            }
-                        }
+                        // Keep one-target behavior deterministic: ignore transient de-select events
+                        // and only update when we have an actual row target.
+                        if (selectedId == null) return;
+                        applyTargetSelection(selectedId);
+                    }}
+                    // Row click must also trigger focus. A newly added target can already be selected
+                    // in state, so selection-change callbacks may not fire on first user click.
+                    onRowClick={(params) => {
+                        applyTargetSelection(params?.row?.id);
                     }}
                     onRowDoubleClick={(params) => {
                         if (onRowDoubleClick) {

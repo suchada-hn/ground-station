@@ -55,6 +55,7 @@ import { refreshMonitoredCelestialNow } from './celestial-slice.jsx';
 
 const STALE_MS = 5 * 60 * 1000;
 const HEX_COLOR_PATTERN = /^#[0-9A-F]{6}$/;
+const MAX_PROJECTION_HOURS = 4320;
 const HOUR_OPTIONS = [
     { value: 6, label: '6h' },
     { value: 12, label: '12h' },
@@ -65,16 +66,17 @@ const HOUR_OPTIONS = [
     { value: 720, label: '1mo' },
     { value: 2160, label: '3mo' },
     { value: 4320, label: '6mo' },
-    { value: 8760, label: '1y' },
 ];
 const PAST_HOUR_OPTIONS = [{ value: 0, label: '0h' }, ...HOUR_OPTIONS];
 const coercePastHours = (value) => {
     const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    if (!Number.isFinite(parsed) || parsed < 0) return 0;
+    return Math.min(parsed, MAX_PROJECTION_HOURS);
 };
 const coerceFutureHours = (value) => {
     const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 24;
+    if (!Number.isFinite(parsed) || parsed <= 0) return 24;
+    return Math.min(parsed, MAX_PROJECTION_HOURS);
 };
 const DIALOG_PAPER_SX = {
     bgcolor: 'background.paper',

@@ -129,7 +129,7 @@
     "sunrise": "Amanecer",
     "sunset": "Atardecer",
     "now": "AHORA",
-    "noPassesAvailable": "No hay pasadas de satélite disponibles",
+    "noPassesAvailable": "No hay pasadas disponibles",
     "noPassesForSelected": "No hay pasadas para las {{hours}} horas seleccionadas",
     "active": "ACTIVA",
     "start": "Inicio",

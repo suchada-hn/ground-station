@@ -129,7 +129,7 @@
     "sunrise": "Sonnenaufgang",
     "sunset": "Sonnenuntergang",
     "now": "JETZT",
-    "noPassesAvailable": "Keine Satellitenüberflüge verfügbar",
+    "noPassesAvailable": "Keine Überflüge verfügbar",
     "noPassesForSelected": "Keine Überflüge für die ausgewählten {{hours}} Stunden",
     "active": "AKTIV",
     "start": "Start",

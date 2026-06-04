@@ -457,13 +457,44 @@ export const useTimelineEvents = ({
     }
   }, [setIsPanning]);
 
+  const timelineSpansMultipleDates = (() => {
+    if (!startTime || !endTime) return false;
+
+    const startDateKey = new Date(startTime).toLocaleDateString('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const endDateKey = new Date(endTime).toLocaleDateString('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return startDateKey !== endDateKey;
+  })();
+
   const formatHoverTime = (date) => {
     if (!date) return '';
+    if (timelineSpansMultipleDates) {
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+        timeZone: timezone,
+      });
+    }
     return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      timeZone: timezone
+      hour12: false,
+      timeZone: timezone,
     });
   };
 

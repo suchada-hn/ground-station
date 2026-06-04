@@ -110,13 +110,12 @@ class TrackerManager:
             return None
 
         payload: Optional[Dict[str, Any]] = None
-        cached = (
-            await crud_celestial_vectors.fetch_latest_celestial_vectors_cache_entry_for_command(
-                dbsession,
-                command=command,
-                valid_only=False,
-                as_of=datetime.now(timezone.utc),
-            )
+        target_key = f"mission:{command}"
+        cached = await crud_celestial_vectors.fetch_latest_celestial_vector_snapshot_for_target(
+            dbsession,
+            target_id=target_key,
+            valid_only=False,
+            as_of=datetime.now(timezone.utc),
         )
         if cached.get("success") and isinstance(cached.get("data"), dict):
             cached_payload = (cached["data"] or {}).get("payload")

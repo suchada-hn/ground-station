@@ -5,7 +5,7 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-"""Scene builder for celestial page (offline planets + Horizons celestial)."""
+"""Scene builder for celestial page (Horizons-backed solar system + targets)."""
 
 from __future__ import annotations
 
@@ -21,12 +21,10 @@ import crud.celestialvectors as crud_celestial_vectors
 import crud.locations as crud_locations
 import crud.monitoredcelestial as crud_monitored
 from celestial.asteroidzones import get_static_asteroid_zones
+from celestial.bodycatalog import list_celestial_bodies
 from celestial.horizons import fetch_celestial_vectors
 from celestial.observermath import compute_observer_sky_position
-from celestial.solarsystem import (
-    compute_body_position_heliocentric_au,
-    compute_solar_system_snapshot,
-)
+from celestial.solarsystem import compute_body_position_heliocentric_au
 from common.arguments import arguments
 from db import AsyncSessionLocal
 
@@ -42,12 +40,15 @@ def _config_int(name: str, default: int, minimum: int) -> int:
 # Celestial cache policy is fixed by code, not by app config.
 CACHE_TTL_SECONDS = 120
 VECTOR_DB_TTL_SECONDS = 2 * 60 * 60
+CANONICAL_WINDOW_DB_TTL_SECONDS = 3 * 24 * 60 * 60
 VECTOR_EPOCH_BUCKET_MINUTES = 60
 COMPUTED_EPOCH_BUCKET_SECONDS = 60
 SKY_MOTION_ACCURACY_TARGET_DEG = 0.25
 SKY_MOTION_SAFETY_FACTOR = 0.5
 SKY_MOTION_DYNAMIC_TTL_MIN_SECONDS = 2 * 60
 SKY_MOTION_DYNAMIC_TTL_MAX_SECONDS = 6 * 60 * 60
+CANONICAL_WINDOW_HOURS = 24 * 180
+CANONICAL_WINDOW_STEP_MINUTES = 180
 SCHEDULED_SYNC_PAST_HOURS = _config_int("celestial_sync_past_hours", 1, 0)
 SCHEDULED_SYNC_FUTURE_HOURS = 24
 SCHEDULED_SYNC_STEP_MINUTES = 60
@@ -57,6 +58,34 @@ NO_EPHEMERIS_ERROR_FRAGMENT = "No ephemeris data returned by Horizons"
 CELESTIAL_PASS_HORIZON_DEG = 0.0
 CURVE_DENSIFY_TARGET_STEP_SECONDS = 5 * 60
 CURVE_DENSIFY_MAX_INSERTS_PER_SEGMENT = 8
+DEFAULT_FRAME = "heliocentric-ecliptic"
+DEFAULT_CENTER = "sun"
+BODY_HORIZONS_COMMANDS: Dict[str, str] = {
+    # Major planets.
+    "mercury": "199",
+    "venus": "299",
+    "earth": "399",
+    "mars": "499",
+    "jupiter": "599",
+    "saturn": "699",
+    "uranus": "799",
+    "neptune": "899",
+    # Moons currently exposed by the body catalog.
+    "moon": "301",
+    "io": "501",
+    "europa": "502",
+    "ganymede": "503",
+    "callisto": "504",
+    "enceladus": "602",
+    "rhea": "605",
+    "titan": "606",
+    "iapetus": "608",
+}
+_BODY_CATALOG_BY_ID: Dict[str, Dict[str, Any]] = {
+    str(item.get("body_id") or "").strip().lower(): item
+    for item in list_celestial_bodies()
+    if str(item.get("body_id") or "").strip()
+}
 
 
 @dataclass
@@ -104,6 +133,40 @@ def _parse_epoch(data: Optional[Dict[str, Any]]) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def _build_body_target_payload(
+    *,
+    body_id: str,
+    name: Optional[str] = None,
+    color: Any = None,
+    target_key: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    normalized_body_id = str(body_id or "").strip().lower()
+    if not normalized_body_id:
+        return None
+
+    catalog_entry = _BODY_CATALOG_BY_ID.get(normalized_body_id) or {}
+    body_class = str(catalog_entry.get("body_type") or "").strip().lower() or None
+    parent_body_id = str(catalog_entry.get("parent_body_id") or "").strip().lower() or None
+    horizons_command = str(BODY_HORIZONS_COMMANDS.get(normalized_body_id) or "").strip()
+    display_name = str(name or catalog_entry.get("name") or normalized_body_id).strip()
+
+    return {
+        "target_type": "body",
+        "target_key": str(
+            target_key or _target_key_from_parts("body", body_id=normalized_body_id)
+        ).strip(),
+        "body_id": normalized_body_id,
+        # Keep "command" populated for existing UI/tooling paths that expect a command-like field.
+        "command": horizons_command or normalized_body_id,
+        "horizons_command": horizons_command,
+        "name": display_name,
+        "color": color,
+        "body_class": body_class,
+        "parent_body_id": parent_body_id,
+        "always_in_scene": normalized_body_id != "sun",
+    }
+
+
 def _normalize_targets(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not data:
         return DEFAULT_CELESTIAL_TARGETS.copy()
@@ -123,6 +186,7 @@ def _normalize_targets(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
                         "target_type": "mission",
                         "target_key": _target_key_from_parts("mission", command=command),
                         "command": command,
+                        "horizons_command": command,
                         "name": command,
                     }
                 )
@@ -148,16 +212,14 @@ def _normalize_targets(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 )
                 if not body_id:
                     continue
-                name = str(item.get("name") or body_id).strip()
-                normalized.append(
-                    {
-                        "target_type": "body",
-                        "target_key": _target_key_from_parts("body", body_id=body_id),
-                        "body_id": body_id,
-                        "name": name,
-                        "color": color,
-                    }
+                body_payload = _build_body_target_payload(
+                    body_id=body_id,
+                    name=str(item.get("name") or body_id).strip(),
+                    color=color,
+                    target_key=_target_key_from_parts("body", body_id=body_id),
                 )
+                if body_payload:
+                    normalized.append(body_payload)
                 continue
 
             command = str(item.get("command") or item.get("id") or item.get("target") or "").strip()
@@ -169,12 +231,74 @@ def _normalize_targets(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     "target_type": "mission",
                     "target_key": _target_key_from_parts("mission", command=command),
                     "command": command,
+                    "horizons_command": command,
                     "name": name,
                     "color": color,
                 }
             )
 
     return normalized
+
+
+def _build_builtin_body_targets() -> List[Dict[str, Any]]:
+    """Build the always-in-scene body target list from the body catalog."""
+    rows: List[Dict[str, Any]] = []
+    for entry in list_celestial_bodies():
+        body_id = str(entry.get("body_id") or "").strip().lower()
+        if not body_id or body_id == "sun":
+            continue
+
+        body_payload = _build_body_target_payload(
+            body_id=body_id,
+            name=str(entry.get("name") or body_id).strip(),
+            target_key=_target_key_from_parts("body", body_id=body_id),
+        )
+        if not body_payload:
+            continue
+        body_payload["always_in_scene"] = True
+        rows.append(body_payload)
+    return rows
+
+
+async def _ensure_scene_targets_registered(
+    targets: List[Dict[str, Any]],
+    logger: Any,
+) -> None:
+    """Persist target metadata so snapshots can reference an explicit target row."""
+    if not targets:
+        return
+
+    upsert_rows: List[Dict[str, Any]] = []
+    for target in targets:
+        target_key = str(target.get("target_key") or "").strip()
+        target_type = str(target.get("target_type") or "").strip().lower()
+        if not target_key or target_type not in {"mission", "body"}:
+            continue
+
+        upsert_rows.append(
+            {
+                "id": target_key,
+                "target_type": target_type,
+                "body_class": target.get("body_class"),
+                "display_name": str(target.get("name") or target_key).strip(),
+                "horizons_command": str(
+                    target.get("horizons_command") or target.get("command") or ""
+                ).strip()
+                or None,
+                "body_id": str(target.get("body_id") or "").strip().lower() or None,
+                "parent_body_id": str(target.get("parent_body_id") or "").strip().lower() or None,
+                "always_in_scene": bool(target.get("always_in_scene", False)),
+                "enabled": True,
+            }
+        )
+
+    if not upsert_rows:
+        return
+
+    async with AsyncSessionLocal() as dbsession:
+        result = await crud_celestial_vectors.ensure_celestial_targets(dbsession, upsert_rows)
+    if not result.get("success"):
+        logger.warning("Failed to register celestial targets: %s", result.get("error"))
 
 
 def _parse_projection_options(data: Optional[Dict[str, Any]]) -> Tuple[int, int, int]:
@@ -379,6 +503,150 @@ def _extract_orbit_samples(
             ]
 
     return list(zip(sample_times, positions))
+
+
+def _interpolate_position_from_samples(
+    samples: List[Tuple[datetime, List[float]]],
+    at_time: datetime,
+) -> Optional[List[float]]:
+    if not samples:
+        return None
+    ordered = sorted(samples, key=lambda item: item[0])
+    first_time, first_pos = ordered[0]
+    last_time, last_pos = ordered[-1]
+    if at_time <= first_time:
+        return [float(first_pos[0]), float(first_pos[1]), float(first_pos[2])]
+    if at_time >= last_time:
+        return [float(last_pos[0]), float(last_pos[1]), float(last_pos[2])]
+
+    cursor = 0
+    for sample_time, _sample_position in ordered[1:]:
+        if sample_time >= at_time:
+            break
+        cursor += 1
+    left_time, left_pos = ordered[cursor]
+    right_time, right_pos = ordered[cursor + 1]
+    span_seconds = (right_time - left_time).total_seconds()
+    if span_seconds <= 1e-9:
+        return [float(left_pos[0]), float(left_pos[1]), float(left_pos[2])]
+    ratio = max(0.0, min(1.0, (at_time - left_time).total_seconds() / span_seconds))
+    return [
+        float(left_pos[0]) + ((float(right_pos[0]) - float(left_pos[0])) * ratio),
+        float(left_pos[1]) + ((float(right_pos[1]) - float(left_pos[1])) * ratio),
+        float(left_pos[2]) + ((float(right_pos[2]) - float(left_pos[2])) * ratio),
+    ]
+
+
+def _slice_payload_to_projection_window(
+    *,
+    payload: Dict[str, Any],
+    epoch: datetime,
+    requested_past_hours: int,
+    requested_future_hours: int,
+    requested_step_minutes: int,
+    source_past_hours: int,
+    source_future_hours: int,
+) -> Optional[Dict[str, Any]]:
+    samples = _extract_orbit_samples(
+        payload,
+        epoch_fallback=epoch,
+        past_hours=source_past_hours,
+        future_hours=source_future_hours,
+    )
+    if len(samples) < 2:
+        return None
+
+    ordered = sorted(samples, key=lambda item: item[0])
+    requested_start = epoch - timedelta(hours=int(requested_past_hours))
+    requested_end = epoch + timedelta(hours=int(requested_future_hours))
+    if ordered[0][0] > requested_start or ordered[-1][0] < requested_end:
+        return None
+
+    sampled_times = _build_window_timestamps(
+        epoch=epoch,
+        past_hours=requested_past_hours,
+        future_hours=requested_future_hours,
+        step_minutes=requested_step_minutes,
+    )
+    sampled_positions: List[List[float]] = []
+    sampled_time_strings: List[str] = []
+    for sample_time in sampled_times:
+        interpolated = _interpolate_position_from_samples(ordered, sample_time)
+        if not interpolated:
+            continue
+        sampled_positions.append(interpolated)
+        sampled_time_strings.append(sample_time.astimezone(timezone.utc).isoformat())
+
+    if len(sampled_positions) < 2:
+        return None
+
+    sliced_payload = dict(payload)
+    sliced_payload["orbit_samples_xyz_au"] = sampled_positions
+    sliced_payload["orbit_sample_times_utc"] = sampled_time_strings
+    sliced_payload["position_xyz_au"] = _interpolate_position_from_samples(
+        ordered, epoch
+    ) or payload.get("position_xyz_au")
+    sliced_payload["orbit_sampling"] = {
+        "past_hours": int(requested_past_hours),
+        "future_hours": int(requested_future_hours),
+        "step_minutes": int(requested_step_minutes),
+    }
+    return sliced_payload
+
+
+def _slice_cached_row_to_requested_projection(
+    *,
+    cached_row: Optional[Dict[str, Any]],
+    epoch: datetime,
+    requested_past_hours: int,
+    requested_future_hours: int,
+    requested_step_minutes: int,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(cached_row, dict):
+        return None
+    payload = cached_row.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    try:
+        source_past_hours = int(cached_row.get("past_hours", requested_past_hours))
+        source_future_hours = int(cached_row.get("future_hours", requested_future_hours))
+    except (TypeError, ValueError):
+        source_past_hours = int(requested_past_hours)
+        source_future_hours = int(requested_future_hours)
+
+    return _slice_payload_to_projection_window(
+        payload=dict(payload),
+        epoch=epoch,
+        requested_past_hours=requested_past_hours,
+        requested_future_hours=requested_future_hours,
+        requested_step_minutes=requested_step_minutes,
+        source_past_hours=source_past_hours,
+        source_future_hours=source_future_hours,
+    )
+
+
+def _resolve_fetch_projection_window(
+    *,
+    past_hours: int,
+    future_hours: int,
+    step_minutes: int,
+) -> Tuple[int, int, int]:
+    if int(past_hours) <= CANONICAL_WINDOW_HOURS and int(future_hours) <= CANONICAL_WINDOW_HOURS:
+        return CANONICAL_WINDOW_HOURS, CANONICAL_WINDOW_HOURS, CANONICAL_WINDOW_STEP_MINUTES
+    return int(past_hours), int(future_hours), int(step_minutes)
+
+
+def _resolve_db_ttl_seconds(
+    *,
+    fetch_past_hours: int,
+    fetch_future_hours: int,
+) -> int:
+    if (
+        int(fetch_past_hours) >= CANONICAL_WINDOW_HOURS
+        and int(fetch_future_hours) >= CANONICAL_WINDOW_HOURS
+    ):
+        return CANONICAL_WINDOW_DB_TTL_SECONDS
+    return VECTOR_DB_TTL_SECONDS
 
 
 def _interpolate_position_xyz_au_at_epoch(
@@ -638,6 +906,112 @@ def _build_body_snapshot_by_id(planets: List[Dict[str, Any]]) -> Dict[str, Dict[
         },
     )
     return snapshot
+
+
+async def _build_horizons_solar_system_bodies(
+    *,
+    epoch: datetime,
+    past_hours: int,
+    future_hours: int,
+    step_minutes: int,
+    observer_location: Optional[Dict[str, Any]],
+    force_refresh: bool,
+    allow_network_fetch: bool,
+    logger: Any,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Build the solar-system body list from Horizons snapshots.
+
+    This list is independent from monitored targets and is always included in scene payloads.
+    """
+    builtin_targets = _build_builtin_body_targets()
+    await _ensure_scene_targets_registered(builtin_targets, logger)
+
+    planets: List[Dict[str, Any]] = []
+    stale_count = 0
+    missing_count = 0
+    for target in builtin_targets:
+        body_id = str(target.get("body_id") or "").strip().lower()
+        target_key = str(target.get("target_key") or "").strip()
+        command = str(target.get("horizons_command") or "").strip()
+        if not body_id or not target_key or not command:
+            continue
+
+        snapshot = await _get_vectors_snapshot(
+            target_key=target_key,
+            command=command,
+            epoch=epoch,
+            past_hours=past_hours,
+            future_hours=future_hours,
+            step_minutes=step_minutes,
+            observer_location=observer_location,
+            force_refresh=force_refresh,
+            logger=logger,
+            allow_network_fetch=allow_network_fetch,
+        )
+        payload = snapshot.get("payload")
+        if not isinstance(payload, dict):
+            missing_count += 1
+            fallback_position = [0.0, 0.0, 0.0]
+            fallback_velocity = [0.0, 0.0, 0.0]
+            try:
+                fallback_position = compute_body_position_heliocentric_au(body_id, epoch)
+            except Exception:
+                fallback_position = [0.0, 0.0, 0.0]
+            # Keep a renderable fallback row even when Horizons is unavailable.
+            planets.append(
+                {
+                    "id": body_id,
+                    "name": str(target.get("name") or body_id),
+                    "body_type": target.get("body_class") or "body",
+                    "parent_id": target.get("parent_body_id"),
+                    "position_xyz_au": fallback_position,
+                    "velocity_xyz_au_per_day": fallback_velocity,
+                    "orbit_samples_xyz_au": [],
+                    "source": "horizons",
+                    "cache": snapshot.get("cache"),
+                    "stale": True,
+                    "error": snapshot.get("error") or "No data returned",
+                    "phase": None,
+                }
+            )
+            continue
+
+        row_payload = {
+            "id": body_id,
+            "name": str(target.get("name") or body_id),
+            "body_type": target.get("body_class") or "body",
+            "parent_id": target.get("parent_body_id"),
+            "position_xyz_au": payload.get("position_xyz_au"),
+            "velocity_xyz_au_per_day": payload.get("velocity_xyz_au_per_day"),
+            "orbit_samples_xyz_au": payload.get("orbit_samples_xyz_au") or [],
+            "orbit_sample_times_utc": payload.get("orbit_sample_times_utc") or [],
+            "source": payload.get("source") or "horizons",
+            "cache": snapshot.get("cache"),
+            "stale": bool(snapshot.get("stale")),
+            "phase": None,
+        }
+        if snapshot.get("error"):
+            row_payload["error"] = snapshot.get("error")
+        if row_payload["stale"]:
+            stale_count += 1
+        planets.append(row_payload)
+
+    solar_meta = {
+        "source": "horizons",
+        "reference": "JPL Horizons vectors",
+        "epoch_utc": epoch.astimezone(timezone.utc).isoformat(),
+        "body_type_counts": {
+            "planet": sum(1 for row in planets if str(row.get("body_type")) == "planet"),
+            "moon": sum(1 for row in planets if str(row.get("body_type")) == "moon"),
+        },
+        "cache": {
+            "stale_count": stale_count,
+            "missing_count": missing_count,
+        },
+    }
+
+    return solar_meta, planets
 
 
 async def _load_observer_location() -> Optional[Dict[str, Any]]:
@@ -1042,7 +1416,22 @@ def _extract_row_observer_samples(
     target_type = str(row.get("target_type") or "mission").strip().lower()
     samples: List[Dict[str, Any]] = []
 
-    if target_type == "body":
+    positions_obj = row.get("orbit_samples_xyz_au")
+    positions: List[List[float]] = []
+    if isinstance(positions_obj, list):
+        for sample in positions_obj:
+            if not isinstance(sample, list) or len(sample) < 3:
+                continue
+            try:
+                position = [float(sample[0]), float(sample[1]), float(sample[2])]
+            except (TypeError, ValueError):
+                continue
+            positions.append(position)
+
+    if len(positions) < 2:
+        # Fallback path for body rows when no Horizons sample curve is available.
+        if target_type != "body":
+            return []
         body_id = str(row.get("body_id") or row.get("command") or "").strip().lower()
         if not body_id:
             return []
@@ -1081,21 +1470,6 @@ def _extract_row_observer_samples(
             except Exception:
                 continue
         return samples
-
-    positions_obj = row.get("orbit_samples_xyz_au")
-    positions: List[List[float]] = []
-    if isinstance(positions_obj, list):
-        for sample in positions_obj:
-            if not isinstance(sample, list) or len(sample) < 3:
-                continue
-            try:
-                position = [float(sample[0]), float(sample[1]), float(sample[2])]
-            except (TypeError, ValueError):
-                continue
-            positions.append(position)
-
-    if len(positions) < 2:
-        return []
 
     raw_times_obj = row.get("orbit_sample_times_utc")
     sample_times: List[datetime] = []
@@ -1201,21 +1575,25 @@ def _build_celestial_passes(
 
 
 async def _load_vectors_from_db(
-    command: str,
+    target_key: str,
     epoch_bucket_utc: datetime,
     past_hours: int,
     future_hours: int,
     step_minutes: int,
+    frame: str = DEFAULT_FRAME,
+    center: str = DEFAULT_CENTER,
     valid_only: bool = True,
 ) -> Optional[Dict[str, Any]]:
     async with AsyncSessionLocal() as dbsession:
-        result = await crud_celestial_vectors.fetch_celestial_vectors_cache_entry(
+        result = await crud_celestial_vectors.fetch_celestial_vector_snapshot(
             dbsession,
-            command=command,
+            target_id=target_key,
             epoch_bucket_utc=epoch_bucket_utc,
             past_hours=past_hours,
             future_hours=future_hours,
             step_minutes=step_minutes,
+            frame=frame,
+            center=center,
             valid_only=valid_only,
             as_of=datetime.now(timezone.utc),
         )
@@ -1226,19 +1604,40 @@ async def _load_vectors_from_db(
 
 
 async def _load_latest_vectors_from_db(
-    command: str,
+    target_key: str,
     past_hours: int,
     future_hours: int,
     step_minutes: int,
+    frame: str = DEFAULT_FRAME,
+    center: str = DEFAULT_CENTER,
     valid_only: bool = False,
 ) -> Optional[Dict[str, Any]]:
     async with AsyncSessionLocal() as dbsession:
-        result = await crud_celestial_vectors.fetch_latest_celestial_vectors_cache_entry(
+        result = await crud_celestial_vectors.fetch_latest_celestial_vector_snapshot(
             dbsession,
-            command=command,
+            target_id=target_key,
             past_hours=past_hours,
             future_hours=future_hours,
             step_minutes=step_minutes,
+            frame=frame,
+            center=center,
+            valid_only=valid_only,
+            as_of=datetime.now(timezone.utc),
+        )
+    if not result.get("success"):
+        return None
+    row = result.get("data")
+    return row if isinstance(row, dict) else None
+
+
+async def _load_latest_vectors_for_target_from_db(
+    target_key: str,
+    valid_only: bool = False,
+) -> Optional[Dict[str, Any]]:
+    async with AsyncSessionLocal() as dbsession:
+        result = await crud_celestial_vectors.fetch_latest_celestial_vector_snapshot_for_target(
+            dbsession,
+            target_id=target_key,
             valid_only=valid_only,
             as_of=datetime.now(timezone.utc),
         )
@@ -1252,45 +1651,54 @@ async def _load_latest_vectors_for_command_from_db(
     command: str,
     valid_only: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    async with AsyncSessionLocal() as dbsession:
-        result = (
-            await crud_celestial_vectors.fetch_latest_celestial_vectors_cache_entry_for_command(
-                dbsession,
-                command=command,
-                valid_only=valid_only,
-                as_of=datetime.now(timezone.utc),
-            )
-        )
-    if not result.get("success"):
+    """Mission compatibility helper used by cache policy tests and mission callers."""
+    mission_target_key = _target_key_from_parts("mission", command=command)
+    if not mission_target_key:
         return None
-    row = result.get("data")
-    return row if isinstance(row, dict) else None
+    return await _load_latest_vectors_for_target_from_db(
+        target_key=mission_target_key,
+        valid_only=valid_only,
+    )
 
 
 async def _store_vectors_in_db(
-    command: str,
+    target_key: str,
     epoch_bucket_utc: datetime,
     past_hours: int,
     future_hours: int,
     step_minutes: int,
     payload: Dict[str, Any],
     source: str,
+    frame: str = DEFAULT_FRAME,
+    center: str = DEFAULT_CENTER,
     error: Optional[str] = None,
+    ttl_seconds: int = VECTOR_DB_TTL_SECONDS,
 ) -> None:
+    position_xyz_au = payload.get("position_xyz_au")
+    velocity_xyz_au_per_day = payload.get("velocity_xyz_au_per_day")
+    orbit_samples_xyz_au = payload.get("orbit_samples_xyz_au")
+    orbit_sample_times_utc = payload.get("orbit_sample_times_utc")
     async with AsyncSessionLocal() as dbsession:
-        await crud_celestial_vectors.upsert_celestial_vectors_cache_entry(
+        await crud_celestial_vectors.upsert_celestial_vector_snapshot(
             dbsession,
             data={
-                "command": command,
+                "target_id": target_key,
                 "epoch_bucket_utc": epoch_bucket_utc,
                 "past_hours": past_hours,
                 "future_hours": future_hours,
                 "step_minutes": step_minutes,
-                "payload": payload,
+                "frame": frame,
+                "center": center,
+                "position_xyz_au": position_xyz_au,
+                "velocity_xyz_au_per_day": velocity_xyz_au_per_day,
+                "orbit_samples_xyz_au": orbit_samples_xyz_au,
+                "orbit_sample_times_utc": orbit_sample_times_utc,
+                "horizons_signature": payload.get("horizons_signature"),
                 "source": source,
                 "error": error,
                 "fetched_at": datetime.now(timezone.utc),
-                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=VECTOR_DB_TTL_SECONDS),
+                "expires_at": datetime.now(timezone.utc)
+                + timedelta(seconds=max(60, int(ttl_seconds))),
             },
         )
 
@@ -1305,18 +1713,41 @@ async def _get_vectors_snapshot(
     force_refresh: bool,
     logger: Any,
     allow_network_fetch: bool = True,
+    target_key: str = "",
 ) -> Dict[str, Any]:
+    normalized_target_key = str(target_key or "").strip()
+    if not normalized_target_key:
+        normalized_target_key = _target_key_from_parts("mission", command=command)
+    if not normalized_target_key:
+        return {
+            "payload": None,
+            "cache": "miss",
+            "stale": True,
+            "error": "Target key is required",
+        }
+
     epoch_bucket_utc = _bucket_epoch(epoch, VECTOR_EPOCH_BUCKET_MINUTES * 60)
+    fetch_past_hours, fetch_future_hours, fetch_step_minutes = _resolve_fetch_projection_window(
+        past_hours=past_hours,
+        future_hours=future_hours,
+        step_minutes=step_minutes,
+    )
+    fetched_payload_ttl_seconds = _resolve_db_ttl_seconds(
+        fetch_past_hours=fetch_past_hours,
+        fetch_future_hours=fetch_future_hours,
+    )
 
     # Cache-only callers still query DB even when force_refresh=True.
     if (not force_refresh) or (not allow_network_fetch):
         valid_only = not force_refresh and allow_network_fetch
         cached = await _load_vectors_from_db(
-            command=command,
+            target_key=normalized_target_key,
             epoch_bucket_utc=epoch_bucket_utc,
             past_hours=past_hours,
             future_hours=future_hours,
             step_minutes=step_minutes,
+            frame=DEFAULT_FRAME,
+            center=DEFAULT_CENTER,
             valid_only=valid_only,
         )
         if cached and isinstance(cached.get("payload"), dict):
@@ -1328,10 +1759,12 @@ async def _get_vectors_snapshot(
             }
 
         latest = await _load_latest_vectors_from_db(
-            command=command,
+            target_key=normalized_target_key,
             past_hours=past_hours,
             future_hours=future_hours,
             step_minutes=step_minutes,
+            frame=DEFAULT_FRAME,
+            center=DEFAULT_CENTER,
             valid_only=False,
         )
         if latest and isinstance(latest.get("payload"), dict):
@@ -1361,12 +1794,41 @@ async def _get_vectors_snapshot(
                         "cache_policy": policy,
                     }
 
+        # Reuse any broader cached window for this target by slicing it to the
+        # requested past/future projection. This avoids a network fetch when a
+        # compatible long-range cache row already exists.
+        latest_for_target = await _load_latest_vectors_for_target_from_db(
+            target_key=normalized_target_key,
+            valid_only=valid_only,
+        )
+        sliced_payload = _slice_cached_row_to_requested_projection(
+            cached_row=latest_for_target,
+            epoch=epoch,
+            requested_past_hours=past_hours,
+            requested_future_hours=future_hours,
+            requested_step_minutes=step_minutes,
+        )
+        if sliced_payload:
+            return {
+                "payload": sliced_payload,
+                "cache": "db-window-hit" if allow_network_fetch else "db-cache-only-window-hit",
+                "stale": False if valid_only else _cache_row_is_expired(latest_for_target),
+                "error": None,
+            }
+
         # Fall back to any latest payload for this command when projection-specific cache is empty.
         if not allow_network_fetch:
-            latest_for_command = await _load_latest_vectors_for_command_from_db(
-                command=command,
-                valid_only=False,
-            )
+            latest_for_command: Optional[Dict[str, Any]] = None
+            if normalized_target_key.startswith("mission:"):
+                latest_for_command = await _load_latest_vectors_for_command_from_db(
+                    command=command,
+                    valid_only=False,
+                )
+            else:
+                latest_for_command = await _load_latest_vectors_for_target_from_db(
+                    target_key=normalized_target_key,
+                    valid_only=False,
+                )
             if latest_for_command and isinstance(latest_for_command.get("payload"), dict):
                 return {
                     "payload": dict(latest_for_command["payload"]),
@@ -1378,7 +1840,7 @@ async def _get_vectors_snapshot(
                 "payload": None,
                 "cache": "cache-only-miss",
                 "stale": True,
-                "error": f"No cached vectors available for command '{command}'",
+                "error": f"No cached vectors available for target '{normalized_target_key}'",
             }
 
     if not allow_network_fetch:
@@ -1386,7 +1848,7 @@ async def _get_vectors_snapshot(
             "payload": None,
             "cache": "cache-only-miss",
             "stale": True,
-            "error": f"No cached vectors available for command '{command}'",
+            "error": f"No cached vectors available for target '{normalized_target_key}'",
         }
 
     try:
@@ -1394,29 +1856,57 @@ async def _get_vectors_snapshot(
             fetch_celestial_vectors,
             command,
             epoch,
-            past_hours,
-            future_hours,
-            step_minutes,
+            fetch_past_hours,
+            fetch_future_hours,
+            fetch_step_minutes,
         )
         await _store_vectors_in_db(
-            command=command,
+            target_key=normalized_target_key,
             epoch_bucket_utc=epoch_bucket_utc,
-            past_hours=past_hours,
-            future_hours=future_hours,
-            step_minutes=step_minutes,
+            past_hours=fetch_past_hours,
+            future_hours=fetch_future_hours,
+            step_minutes=fetch_step_minutes,
             payload=fetched,
             source="horizons",
+            frame=DEFAULT_FRAME,
+            center=DEFAULT_CENTER,
             error=None,
+            ttl_seconds=fetched_payload_ttl_seconds,
         )
+        requested_payload = _slice_payload_to_projection_window(
+            payload=dict(fetched),
+            epoch=epoch,
+            requested_past_hours=past_hours,
+            requested_future_hours=future_hours,
+            requested_step_minutes=step_minutes,
+            source_past_hours=fetch_past_hours,
+            source_future_hours=fetch_future_hours,
+        )
+        if requested_payload:
+            cache_label = (
+                "db-miss-window"
+                if (
+                    fetch_past_hours != past_hours
+                    or fetch_future_hours != future_hours
+                    or fetch_step_minutes != step_minutes
+                )
+                else "db-miss"
+            )
+            return {
+                "payload": requested_payload,
+                "cache": cache_label,
+                "stale": False,
+                "error": None,
+            }
         return {"payload": fetched, "cache": "db-miss", "stale": False, "error": None}
     except Exception as exc:
         fetch_error: Exception = exc
 
-        if _is_no_ephemeris_error(exc) and (past_hours + future_hours) > 72:
+        if _is_no_ephemeris_error(exc) and (fetch_past_hours + fetch_future_hours) > 72:
             for reduced_past, reduced_future, reduced_step in _iter_projection_fallbacks(
-                past_hours=past_hours,
-                future_hours=future_hours,
-                step_minutes=step_minutes,
+                past_hours=fetch_past_hours,
+                future_hours=fetch_future_hours,
+                step_minutes=fetch_step_minutes,
             ):
                 try:
                     fetched = await asyncio.to_thread(
@@ -1429,9 +1919,9 @@ async def _get_vectors_snapshot(
                     )
                     fetched["fallback_projection"] = {
                         "requested": {
-                            "past_hours": past_hours,
-                            "future_hours": future_hours,
-                            "step_minutes": step_minutes,
+                            "past_hours": fetch_past_hours,
+                            "future_hours": fetch_future_hours,
+                            "step_minutes": fetch_step_minutes,
                         },
                         "used": {
                             "past_hours": reduced_past,
@@ -1440,31 +1930,55 @@ async def _get_vectors_snapshot(
                         },
                     }
                     await _store_vectors_in_db(
-                        command=command,
+                        target_key=normalized_target_key,
                         epoch_bucket_utc=epoch_bucket_utc,
-                        past_hours=past_hours,
-                        future_hours=future_hours,
-                        step_minutes=step_minutes,
+                        past_hours=reduced_past,
+                        future_hours=reduced_future,
+                        step_minutes=reduced_step,
                         payload=fetched,
                         source="horizons",
+                        frame=DEFAULT_FRAME,
+                        center=DEFAULT_CENTER,
                         error=None,
+                        ttl_seconds=_resolve_db_ttl_seconds(
+                            fetch_past_hours=reduced_past,
+                            fetch_future_hours=reduced_future,
+                        ),
+                    )
+                    requested_payload = _slice_payload_to_projection_window(
+                        payload=dict(fetched),
+                        epoch=epoch,
+                        requested_past_hours=past_hours,
+                        requested_future_hours=future_hours,
+                        requested_step_minutes=step_minutes,
+                        source_past_hours=reduced_past,
+                        source_future_hours=reduced_future,
                     )
                     logger.info(
                         "Horizons fallback projection succeeded for celestial "
-                        f"'{command}' (requested p={past_hours}h f={future_hours}h s={step_minutes}m, "
+                        f"'{command}' (requested p={fetch_past_hours}h f={fetch_future_hours}h s={fetch_step_minutes}m, "
                         f"used p={reduced_past}h f={reduced_future}h s={reduced_step}m)"
                     )
+                    if requested_payload:
+                        return {
+                            "payload": requested_payload,
+                            "cache": "db-miss-window",
+                            "stale": False,
+                            "error": None,
+                        }
                     return {"payload": fetched, "cache": "db-miss", "stale": False, "error": None}
                 except Exception as retry_exc:
                     fetch_error = retry_exc
 
         logger.warning(f"Horizons fetch failed for celestial '{command}': {fetch_error}")
         fallback = await _load_vectors_from_db(
-            command=command,
+            target_key=normalized_target_key,
             epoch_bucket_utc=epoch_bucket_utc,
             past_hours=past_hours,
             future_hours=future_hours,
             step_minutes=step_minutes,
+            frame=DEFAULT_FRAME,
+            center=DEFAULT_CENTER,
             valid_only=False,
         )
         if fallback and isinstance(fallback.get("payload"), dict):
@@ -1478,10 +1992,12 @@ async def _get_vectors_snapshot(
         # If the exact epoch bucket misses, degrade gracefully to the latest persisted
         # vectors for this projection before returning a hard miss.
         latest_fallback = await _load_latest_vectors_from_db(
-            command=command,
+            target_key=normalized_target_key,
             past_hours=past_hours,
             future_hours=future_hours,
             step_minutes=step_minutes,
+            frame=DEFAULT_FRAME,
+            center=DEFAULT_CENTER,
             valid_only=False,
         )
         if latest_fallback and isinstance(latest_fallback.get("payload"), dict):
@@ -1492,10 +2008,36 @@ async def _get_vectors_snapshot(
                 "error": str(fetch_error),
             }
 
-        latest_for_command_fallback = await _load_latest_vectors_for_command_from_db(
-            command=command,
+        latest_window_fallback = await _load_latest_vectors_for_target_from_db(
+            target_key=normalized_target_key,
             valid_only=False,
         )
+        sliced_window_fallback = _slice_cached_row_to_requested_projection(
+            cached_row=latest_window_fallback,
+            epoch=epoch,
+            requested_past_hours=past_hours,
+            requested_future_hours=future_hours,
+            requested_step_minutes=step_minutes,
+        )
+        if sliced_window_fallback:
+            return {
+                "payload": sliced_window_fallback,
+                "cache": "db-stale-window",
+                "stale": True,
+                "error": str(fetch_error),
+            }
+
+        latest_for_command_fallback: Optional[Dict[str, Any]] = None
+        if normalized_target_key.startswith("mission:"):
+            latest_for_command_fallback = await _load_latest_vectors_for_command_from_db(
+                command=command,
+                valid_only=False,
+            )
+        else:
+            latest_for_command_fallback = await _load_latest_vectors_for_target_from_db(
+                target_key=normalized_target_key,
+                valid_only=False,
+            )
         if latest_for_command_fallback and isinstance(
             latest_for_command_fallback.get("payload"), dict
         ):
@@ -1542,12 +2084,14 @@ async def _fetch_celestial_with_cache(
                     "body", body_id=body_id
                 )
                 body_payload["body_id"] = body_id
-                body_payload["command"] = body_id
+                body_payload["command"] = str(
+                    target.get("horizons_command") or target.get("command") or body_id
+                )
                 body_payload["name"] = name or body_payload.get("name") or body_id
                 body_payload["color"] = color
-                body_payload["source"] = "offline-solar-system"
+                body_payload["source"] = body_payload.get("source") or "horizons"
                 body_payload["stale"] = False
-                body_payload["cache"] = "offline"
+                body_payload["cache"] = body_payload.get("cache") or "scene-base-hit"
                 _attach_observer_view_local(
                     row=body_payload,
                     epoch=epoch,
@@ -1560,17 +2104,88 @@ async def _fetch_celestial_with_cache(
                     await per_row_callback(dict(body_payload), index + 1, total_targets)
                 continue
 
+            horizons_command = str(
+                target.get("horizons_command")
+                or target.get("command")
+                or BODY_HORIZONS_COMMANDS.get(body_id)
+                or ""
+            ).strip()
+            if not horizons_command:
+                body_error = {
+                    "target_type": "body",
+                    "target_key": target_key or _target_key_from_parts("body", body_id=body_id),
+                    "body_id": body_id,
+                    "command": body_id,
+                    "name": name,
+                    "color": color,
+                    "source": "horizons",
+                    "stale": True,
+                    "cache": "missing-command",
+                    "error": f"No Horizons command mapping configured for body '{body_id}'",
+                    "sky_position": None,
+                    "visibility": {
+                        "above_horizon": None,
+                        "visible": None,
+                        "horizon_threshold_deg": 0.0,
+                    },
+                }
+                rows.append(body_error)
+                if per_row_callback:
+                    await per_row_callback(dict(body_error), index + 1, total_targets)
+                continue
+
+            snapshot = await _get_vectors_snapshot(
+                target_key=target_key or _target_key_from_parts("body", body_id=body_id),
+                command=horizons_command,
+                epoch=epoch,
+                past_hours=past_hours,
+                future_hours=future_hours,
+                step_minutes=step_minutes,
+                observer_location=observer_location,
+                force_refresh=force_refresh,
+                logger=logger,
+                allow_network_fetch=allow_network_fetch,
+            )
+            payload = snapshot.get("payload")
+            if isinstance(payload, dict):
+                row_payload = dict(payload)
+                row_payload["target_type"] = "body"
+                row_payload["target_key"] = target_key or _target_key_from_parts(
+                    "body", body_id=body_id
+                )
+                row_payload["body_id"] = body_id
+                row_payload["command"] = horizons_command
+                row_payload["name"] = name
+                row_payload["color"] = color
+                row_payload["body_class"] = target.get("body_class")
+                row_payload["parent_body_id"] = target.get("parent_body_id")
+                row_payload["stale"] = bool(snapshot.get("stale"))
+                row_payload["cache"] = snapshot.get("cache")
+                if snapshot.get("error"):
+                    row_payload["error"] = snapshot.get("error")
+                _attach_observer_view_local(
+                    row=row_payload,
+                    epoch=epoch,
+                    observer_location=observer_location,
+                    earth_position_xyz_au=earth_position_xyz_au,
+                    logger=logger,
+                )
+                rows.append(row_payload)
+                if per_row_callback:
+                    await per_row_callback(dict(row_payload), index + 1, total_targets)
+                continue
+
             body_error = {
                 "target_type": "body",
                 "target_key": target_key or _target_key_from_parts("body", body_id=body_id),
                 "body_id": body_id,
-                "command": body_id,
+                "command": horizons_command,
                 "name": name,
                 "color": color,
-                "source": "offline-solar-system",
+                "source": "horizons",
                 "stale": True,
-                "cache": "offline-miss",
-                "error": f"Body '{body_id}' not present in offline snapshot",
+                "cache": snapshot.get("cache"),
+                "error": snapshot.get("error") or "No data returned",
                 "sky_position": None,
                 "visibility": {
                     "above_horizon": None,
@@ -1583,7 +2198,7 @@ async def _fetch_celestial_with_cache(
                 await per_row_callback(dict(body_error), index + 1, total_targets)
             continue
 
-        command = str(target.get("command") or "").strip()
+        command = str(target.get("horizons_command") or target.get("command") or "").strip()
         if not command:
             continue
         observer_cache_key = "no-observer"
@@ -1596,7 +2211,8 @@ async def _fetch_celestial_with_cache(
             )
         epoch_cache_key = _bucket_epoch(epoch, COMPUTED_EPOCH_BUCKET_SECONDS).isoformat()
         cache_key = (
-            f"mission:{command}|{epoch_cache_key}|p{past_hours}|f{future_hours}|s{step_minutes}"
+            f"{target_key or _target_key_from_parts('mission', command=command)}|{epoch_cache_key}"
+            f"|p{past_hours}|f{future_hours}|s{step_minutes}"
             f"|obs:{observer_cache_key}"
         )
 
@@ -1629,6 +2245,7 @@ async def _fetch_celestial_with_cache(
             continue
 
         snapshot = await _get_vectors_snapshot(
+            target_key=target_key or _target_key_from_parts("mission", command=command),
             command=command,
             epoch=epoch,
             past_hours=past_hours,
@@ -1717,8 +2334,17 @@ async def build_celestial_scene(
     targets = _normalize_targets(data)
     past_hours, future_hours, step_minutes = _parse_projection_options(data)
     observer_location = await _load_observer_location()
-
-    solar_meta, planets = compute_solar_system_snapshot(epoch)
+    await _ensure_scene_targets_registered(targets, logger)
+    solar_meta, planets = await _build_horizons_solar_system_bodies(
+        epoch=epoch,
+        past_hours=past_hours,
+        future_hours=future_hours,
+        step_minutes=step_minutes,
+        observer_location=observer_location,
+        force_refresh=force_refresh,
+        allow_network_fetch=allow_network_fetch,
+        logger=logger,
+    )
     earth_position_xyz_au = _extract_earth_position_xyz_au(planets)
     body_snapshot_by_id = _build_body_snapshot_by_id(planets)
     asteroid_zones, asteroid_resonance_gaps, asteroid_meta = get_static_asteroid_zones()
@@ -1751,8 +2377,8 @@ async def build_celestial_scene(
         "success": True,
         "data": {
             "timestamp_utc": epoch.isoformat(),
-            "frame": "heliocentric-ecliptic",
-            "center": "sun",
+            "frame": DEFAULT_FRAME,
+            "center": DEFAULT_CENTER,
             "units": {
                 "position": "au",
                 "velocity": "au/day",
@@ -1795,18 +2421,27 @@ async def build_solar_system_scene(
     data: Optional[Dict[str, Any]],
     logger,
 ) -> Dict[str, Any]:
-    """Build only the offline solar system portion for fast initial render."""
+    """Build only the Horizons-backed solar-system portion for fast initial render."""
     epoch = _parse_epoch(data)
     past_hours, future_hours, step_minutes = _parse_projection_options(data)
-    solar_meta, planets = compute_solar_system_snapshot(epoch)
+    solar_meta, planets = await _build_horizons_solar_system_bodies(
+        epoch=epoch,
+        past_hours=past_hours,
+        future_hours=future_hours,
+        step_minutes=step_minutes,
+        observer_location=None,
+        force_refresh=False,
+        allow_network_fetch=True,
+        logger=logger,
+    )
     asteroid_zones, asteroid_resonance_gaps, asteroid_meta = get_static_asteroid_zones()
 
     return {
         "success": True,
         "data": {
             "timestamp_utc": epoch.isoformat(),
-            "frame": "heliocentric-ecliptic",
-            "center": "sun",
+            "frame": DEFAULT_FRAME,
+            "center": DEFAULT_CENTER,
             "units": {
                 "position": "au",
                 "velocity": "au/day",
@@ -1817,6 +2452,8 @@ async def build_solar_system_scene(
             "meta": {
                 "solar_system": solar_meta,
                 "asteroid_zones": asteroid_meta,
+                "cache_ttl_seconds": CACHE_TTL_SECONDS,
+                "vector_db_ttl_seconds": VECTOR_DB_TTL_SECONDS,
                 "projection": {
                     "past_hours": past_hours,
                     "future_hours": future_hours,
@@ -1839,9 +2476,13 @@ async def build_celestial_tracks(
     targets = _normalize_targets(data)
     past_hours, future_hours, step_minutes = _parse_projection_options(data)
     observer_location = await _load_observer_location()
-    _, planets = compute_solar_system_snapshot(epoch)
-    earth_position_xyz_au = _extract_earth_position_xyz_au(planets)
-    body_snapshot_by_id = _build_body_snapshot_by_id(planets)
+    await _ensure_scene_targets_registered(targets, logger)
+    earth_position_xyz_au: Optional[List[float]] = None
+    try:
+        earth_position_xyz_au = compute_body_position_heliocentric_au("earth", epoch)
+    except Exception:
+        earth_position_xyz_au = None
+    body_snapshot_by_id: Dict[str, Dict[str, Any]] = {}
     celestial = await _fetch_celestial_with_cache(
         targets,
         epoch,
@@ -1871,8 +2512,8 @@ async def build_celestial_tracks(
         "success": True,
         "data": {
             "timestamp_utc": epoch.isoformat(),
-            "frame": "heliocentric-ecliptic",
-            "center": "sun",
+            "frame": DEFAULT_FRAME,
+            "center": DEFAULT_CENTER,
             "units": {
                 "position": "au",
                 "velocity": "au/day",
@@ -1906,8 +2547,8 @@ async def build_celestial_tracks(
     }
 
 
-async def refresh_monitored_celestial_vectors_cache(logger: Any) -> Dict[str, Any]:
-    """Refresh Horizons vectors for enabled monitored mission targets."""
+async def refresh_celestial_vector_snapshots_cache(logger: Any) -> Dict[str, Any]:
+    """Refresh Horizons vectors for monitored missions and always-in-scene bodies."""
     if _scheduled_sync_lock.locked():
         return {
             "success": False,
@@ -1939,16 +2580,35 @@ async def refresh_monitored_celestial_vectors_cache(logger: Any) -> Dict[str, An
 
         rows_obj = monitored_result.get("data")
         rows: List[Dict[str, Any]] = rows_obj if isinstance(rows_obj, list) else []
-        commands = sorted(
-            {
-                str(row.get("command") or "").strip()
-                for row in rows
-                if str(row.get("target_type") or "mission").strip().lower() == "mission"
-                and str(row.get("command") or "").strip()
-            }
-        )
+        mission_targets: List[Dict[str, Any]] = []
+        for row in rows:
+            target_type = str(row.get("target_type") or "mission").strip().lower()
+            if target_type != "mission":
+                continue
+            command = str(row.get("command") or "").strip()
+            if not command:
+                continue
+            mission_targets.append(
+                {
+                    "target_type": "mission",
+                    "target_key": _target_key_from_parts("mission", command=command),
+                    "name": str(row.get("display_name") or command).strip() or command,
+                    "command": command,
+                    "horizons_command": command,
+                    "always_in_scene": False,
+                }
+            )
 
-        if not commands:
+        builtin_targets = _build_builtin_body_targets()
+        all_targets_by_key: Dict[str, Dict[str, Any]] = {}
+        for target in builtin_targets + mission_targets:
+            target_key = str(target.get("target_key") or "").strip()
+            if not target_key:
+                continue
+            all_targets_by_key[target_key] = target
+
+        all_targets = list(all_targets_by_key.values())
+        if not all_targets:
             return {
                 "success": True,
                 "count": 0,
@@ -1961,20 +2621,34 @@ async def refresh_monitored_celestial_vectors_cache(logger: Any) -> Dict[str, An
                 },
             }
 
+        await _ensure_scene_targets_registered(all_targets, logger)
+
         refreshed = 0
         failed = 0
         errors: List[Dict[str, str]] = []
 
         # Keep the scheduler job deterministic and easy to observe in logs.
-        for command in commands:
+        for target in all_targets:
+            target_key = str(target.get("target_key") or "").strip()
+            command = str(target.get("horizons_command") or target.get("command") or "").strip()
+            if not target_key or not command:
+                failed += 1
+                errors.append(
+                    {
+                        "target_key": target_key or "unknown",
+                        "error": "Missing Horizons command",
+                    }
+                )
+                continue
             snapshot = await _get_vectors_snapshot(
+                target_key=target_key,
                 command=command,
                 epoch=epoch,
                 past_hours=past_hours,
                 future_hours=future_hours,
                 step_minutes=step_minutes,
                 observer_location=None,
-                force_refresh=True,
+                force_refresh=False,
                 logger=logger,
                 allow_network_fetch=True,
             )
@@ -1983,14 +2657,19 @@ async def refresh_monitored_celestial_vectors_cache(logger: Any) -> Dict[str, An
                 continue
             failed += 1
             errors.append(
-                {"command": command, "error": str(snapshot.get("error") or "Unknown error")}
+                {
+                    "target_key": target_key,
+                    "error": str(snapshot.get("error") or "Unknown error"),
+                }
             )
 
         return {
             "success": failed == 0,
-            "count": len(commands),
+            "count": len(all_targets),
             "refreshed": refreshed,
             "failed": failed,
+            "mission_count": len(mission_targets),
+            "always_in_scene_count": len(builtin_targets),
             "errors": errors,
             "projection": {
                 "past_hours": past_hours,

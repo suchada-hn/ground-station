@@ -129,7 +129,7 @@
     "sunrise": "Alba",
     "sunset": "Tramonto",
     "now": "ORA",
-    "noPassesAvailable": "Nessun passaggio satellitare disponibile",
+    "noPassesAvailable": "Nessun passaggio disponibile",
     "noPassesForSelected": "Nessun passaggio per le {{hours}} ore selezionate",
     "active": "ATTIVO",
     "start": "Inizio",

@@ -129,7 +129,7 @@
     "sunrise": "Lever du soleil",
     "sunset": "Coucher du soleil",
     "now": "MAINTENANT",
-    "noPassesAvailable": "Aucun passage de satellite disponible",
+    "noPassesAvailable": "Aucun passage disponible",
     "noPassesForSelected": "Aucun passage pour les {{hours}} heures sélectionnées",
     "active": "ACTIF",
     "start": "Début",

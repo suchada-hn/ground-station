@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 import observations.events as obs_events
-from celestial.scene import refresh_monitored_celestial_vectors_cache
+from celestial.scene import refresh_celestial_vector_snapshots_cache
 from common.arguments import arguments
 from common.logger import logger
 from db import AsyncSessionLocal
@@ -136,26 +136,27 @@ async def run_initial_observation_generation():
         logger.exception(e)
 
 
-async def sync_celestial_vectors_cache_job():
-    """Periodic cache-fill job that prefetches monitored mission vectors from Horizons."""
+async def sync_celestial_vector_snapshots_job():
+    """Periodic cache-fill job that prefetches celestial vector snapshots from Horizons."""
     try:
-        result = await refresh_monitored_celestial_vectors_cache(logger=logger)
+        result = await refresh_celestial_vector_snapshots_cache(logger=logger)
         if result.get("success"):
             logger.info(
-                "Scheduled celestial vectors sync completed: refreshed=%s failed=%s count=%s",
+                "Scheduled celestial vector snapshot sync completed: refreshed=%s failed=%s count=%s",
                 result.get("refreshed", 0),
                 result.get("failed", 0),
                 result.get("count", 0),
             )
             return
         if result.get("skipped"):
-            logger.info("Scheduled celestial vectors sync skipped: %s", result.get("error"))
+            logger.info("Scheduled celestial vector snapshot sync skipped: %s", result.get("error"))
             return
         logger.warning(
-            "Scheduled celestial vectors sync completed with errors: %s", result.get("error")
+            "Scheduled celestial vector snapshot sync completed with errors: %s",
+            result.get("error"),
         )
     except Exception as e:
-        logger.error(f"Error during scheduled celestial vectors sync: {e}")
+        logger.error(f"Error during scheduled celestial vector snapshot sync: {e}")
         logger.exception(e)
 
 
@@ -212,10 +213,10 @@ def start_scheduler(sio, process_manager, background_task_manager):
     if celestial_sync_enabled:
         # Run once immediately at startup, then continue at the configured interval.
         scheduler.add_job(
-            sync_celestial_vectors_cache_job,
+            sync_celestial_vector_snapshots_job,
             trigger=IntervalTrigger(minutes=celestial_sync_interval_minutes),
-            id="sync_celestial_vectors_cache",
-            name="Synchronize celestial vectors cache",
+            id="sync_celestial_vector_snapshots",
+            name="Synchronize celestial vector snapshots",
             replace_existing=True,
             max_instances=1,
             coalesce=True,

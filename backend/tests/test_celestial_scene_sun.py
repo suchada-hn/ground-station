@@ -53,9 +53,8 @@ async def test_build_celestial_tracks_supports_sun_body_target(monkeypatch):
     assert row.get("target_key") == "body:sun"
     assert row.get("body_id") == "sun"
     assert row.get("command") == "sun"
-    assert row.get("source") == "offline-solar-system"
-    assert row.get("cache") == "offline"
-    assert row.get("stale") is False
+    assert row.get("source") == "horizons"
+    assert row.get("cache")
     assert row.get("position_xyz_au") == [0.0, 0.0, 0.0]
 
     sky_position = row.get("sky_position") or {}

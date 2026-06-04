@@ -712,6 +712,36 @@ const PassTimelineComponent = ({
     [startTime, endTime],
   );
   const suppressSunEventMarkers = suppressCurveLabels;
+  const useCompactSunLabels = React.useMemo(() => {
+    if (!showSunMarkers || suppressSunEventMarkers) return false;
+    const events = sunData?.sunEvents || [];
+    if (events.length < 2) return false;
+
+    const totalDurationMs = endTime.getTime() - startTime.getTime();
+    if (!Number.isFinite(totalDurationMs) || totalDurationMs <= 0) return false;
+
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
+    const availableChartWidthPx = Math.max(0, (containerWidth || viewportWidth) - Y_AXIS_WIDTH);
+    if (availableChartWidthPx <= 0) return false;
+
+    // Estimate the rendered width of translated labels and collapse to icon-only when neighbors collide.
+    const sunriseLabel = `☀ ${t('timeline.sunrise')}`;
+    const sunsetLabel = `☾ ${t('timeline.sunset')}`;
+    const averageCharacterWidthPx = 6;
+    const labelChromeWidthPx = 14; // label padding + border + small safety margin
+    const labelWidthPx = Math.max(sunriseLabel.length, sunsetLabel.length) * averageCharacterWidthPx + labelChromeWidthPx;
+    const minSpacingPx = labelWidthPx + 8;
+
+    for (let i = 1; i < events.length; i++) {
+      const eventDeltaMs = events[i].time - events[i - 1].time;
+      const eventGapPx = (eventDeltaMs / totalDurationMs) * availableChartWidthPx;
+      if (eventGapPx < minSpacingPx) {
+        return true;
+      }
+    }
+
+    return false;
+  }, [showSunMarkers, suppressSunEventMarkers, sunData, startTime, endTime, containerWidth, t]);
 
   // Attach non-passive touch event listeners ONCE (stable wrapper functions)
   React.useEffect(() => {
@@ -950,6 +980,9 @@ const PassTimelineComponent = ({
             const leftPosition = `calc(${Y_AXIS_WIDTH}px + (100% - ${Y_AXIS_WIDTH}px) * ${position / 100})`;
             const isSunrise = event.type === 'sunrise';
             const color = isSunrise ? '#6b5110' : '#2a5070'; // Very muted dark gold for sunrise, very muted dark steel blue for sunset
+            const labelText = useCompactSunLabels
+              ? (isSunrise ? '☀' : '☾')
+              : (isSunrise ? `☀ ${t('timeline.sunrise')}` : `☾ ${t('timeline.sunset')}`);
 
             // Always center labels on their vertical lines
             const labelTransform = 'translateX(-50%)';
@@ -981,18 +1014,18 @@ const PassTimelineComponent = ({
                     fontWeight: 'bold',
                     color: color,
                     backgroundColor: theme.palette.background.paper,
-                    padding: '2px 4px',
+                    padding: useCompactSunLabels ? '2px 3px' : '2px 4px',
                     borderRadius: '2px',
                     border: `1px solid ${color}`,
                     whiteSpace: 'nowrap',
                     pointerEvents: 'none',
                     zIndex: 3,
-                    minWidth: '60px',
+                    minWidth: useCompactSunLabels ? 'auto' : '60px',
                     textAlign: 'center',
                     opacity: 0.8,
                   }}
                 >
-                  {isSunrise ? `☀ ${t('timeline.sunrise')}` : `☾ ${t('timeline.sunset')}`}
+                  {labelText}
                 </Box>
               </React.Fragment>
             );

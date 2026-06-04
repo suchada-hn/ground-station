@@ -44,7 +44,7 @@
     "sunrise": "Sunrise",
     "sunset": "Sunset",
     "now": "NOW",
-    "noPassesAvailable": "No satellite passes available",
+    "noPassesAvailable": "No passes available",
     "noPassesForSelected": "No passes for the selected {{hours}} hours",
     "active": "ACTIVE",
     "start": "Start",

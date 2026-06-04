@@ -452,22 +452,56 @@ class MonitoredCelestial(Base):
     )
 
 
-class CelestialVectorsCache(Base):
-    """Persisted Horizons vectors snapshots keyed by target + projection window."""
+class CelestialTargets(Base):
+    """Normalized celestial targets for missions and solar-system bodies."""
 
-    __tablename__ = "celestial_vectors_cache"
+    __tablename__ = "celestial_targets"
 
     id = Column(String, primary_key=True, nullable=False)
-    command = Column(String, nullable=False, index=True)
+    target_type = Column(String, nullable=False, index=True)  # mission | body
+    body_class = Column(String, nullable=True, index=True)  # star | planet | moon
+    display_name = Column(String, nullable=False)
+    horizons_command = Column(String, nullable=True, index=True)
+    body_id = Column(String, nullable=True, index=True)
+    parent_body_id = Column(String, nullable=True, index=True)
+    always_in_scene = Column(Boolean, nullable=False, default=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(AwareDateTime, nullable=False, default=datetime.now(timezone.utc))
+    updated_at = Column(
+        AwareDateTime,
+        nullable=False,
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+    )
+
+
+class CelestialVectorSnapshots(Base):
+    """Horizons vectors snapshots keyed by target and projection window."""
+
+    __tablename__ = "celestial_vector_snapshots"
+
+    id = Column(String, primary_key=True, nullable=False)
+    target_id = Column(String, ForeignKey("celestial_targets.id"), nullable=False, index=True)
     epoch_bucket_utc = Column(AwareDateTime, nullable=False, index=True)
     past_hours = Column(Integer, nullable=False)
     future_hours = Column(Integer, nullable=False)
     step_minutes = Column(Integer, nullable=False)
-    payload = Column(JsonField, nullable=False)
+    frame = Column(
+        String,
+        nullable=False,
+        default="heliocentric-ecliptic",
+        server_default="heliocentric-ecliptic",
+    )
+    center = Column(String, nullable=False, default="sun", server_default="sun")
+    position_xyz_au = Column(JsonField, nullable=False)
+    velocity_xyz_au_per_day = Column(JsonField, nullable=False)
+    orbit_samples_xyz_au = Column(JsonField, nullable=False)
+    orbit_sample_times_utc = Column(JsonField, nullable=False)
+    horizons_signature = Column(JsonField, nullable=True)
     source = Column(String, nullable=False, default="horizons", server_default="horizons")
     error = Column(String, nullable=True)
     fetched_at = Column(AwareDateTime, nullable=False, default=datetime.now(timezone.utc))
-    expires_at = Column(AwareDateTime, nullable=False)
+    expires_at = Column(AwareDateTime, nullable=False, index=True)
     created_at = Column(AwareDateTime, nullable=False, default=datetime.now(timezone.utc))
     updated_at = Column(
         AwareDateTime,

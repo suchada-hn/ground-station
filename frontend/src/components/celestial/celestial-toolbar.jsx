@@ -4,6 +4,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import FitScreenIcon from '@mui/icons-material/FitScreen';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
+import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import { ResetZoomIcon } from '../common/custom-icons.jsx';
 
 const CelestialToolbar = ({
@@ -12,6 +13,7 @@ const CelestialToolbar = ({
     onZoomIn,
     onZoomOut,
     onZoomReset,
+    onCenterSun,
     loading,
     loadingText = '',
     disabled = false,
@@ -87,6 +89,18 @@ const CelestialToolbar = ({
                                     sx={{ borderRadius: 0 }}
                                 >
                                     <ResetZoomIcon />
+                                </IconButton>
+                            </span>
+                        </Tooltip>
+                        <Tooltip title="Center on Sun">
+                            <span>
+                                <IconButton
+                                    onClick={onCenterSun}
+                                    disabled={disabled}
+                                    color="primary"
+                                    sx={{ borderRadius: 0 }}
+                                >
+                                    <WbSunnyIcon />
                                 </IconButton>
                             </span>
                         </Tooltip>
