@@ -135,32 +135,109 @@ export function AdminSatellitesGroupsPage() {
 }
 
 export function AdminSystemGeneralPage() {
-    return <AppSettingsForm />;
+    return (
+        <AdminSystemPageLayout activeTab="general">
+            <AppSettingsForm />
+        </AdminSystemPageLayout>
+    );
 }
 
 export function AdminSystemPreferencesPage() {
-    return <PreferencesForm mode="preferences" />;
+    return (
+        <AdminSystemPageLayout activeTab="preferences">
+            <PreferencesForm mode="preferences" />
+        </AdminSystemPageLayout>
+    );
 }
 
 export function AdminSystemIntegrationsPage() {
-    return <PreferencesForm mode="integrations" />;
+    return (
+        <AdminSystemPageLayout activeTab="integrations">
+            <PreferencesForm mode="integrations" />
+        </AdminSystemPageLayout>
+    );
 }
 
 export function AdminSystemLocationPage() {
-    return <LocationPage />;
+    return (
+        <AdminSystemPageLayout activeTab="location">
+            <LocationPage />
+        </AdminSystemPageLayout>
+    );
 }
 
 export function AdminSystemHardwarePage() {
-    return <AdminSystemHardwareTabs />;
+    return (
+        <AdminSystemPageLayout activeTab="hardware">
+            <AdminSystemHardwareTabs />
+        </AdminSystemPageLayout>
+    );
 }
 
 export function AdminSystemMaintenancePage() {
-    return <MaintenanceForm />;
+    return (
+        <AdminSystemPageLayout activeTab="maintenance">
+            <MaintenanceForm />
+        </AdminSystemPageLayout>
+    );
 }
 
 export function AdminSystemAboutPage() {
-    return <AboutPage />;
+    return (
+        <AdminSystemPageLayout activeTab="about">
+            <AboutPage />
+        </AdminSystemPageLayout>
+    );
 }
+
+const ADMIN_SYSTEM_TABS = [
+    { key: "general", labelKey: "tabs.general", defaultLabel: "General", path: "/admin/system/general" },
+    { key: "preferences", labelKey: "tabs.preferences", defaultLabel: "Preferences", path: "/admin/system/preferences" },
+    { key: "integrations", labelKey: "tabs.integrations", defaultLabel: "Integrations", path: "/admin/system/integrations" },
+    { key: "location", labelKey: "tabs.location", defaultLabel: "Location", path: "/admin/system/location" },
+    { key: "hardware", labelKey: "tabs.hardware", defaultLabel: "Hardware", path: "/admin/system/hardware/rigs" },
+    { key: "maintenance", labelKey: "tabs.maintenance", defaultLabel: "Maintenance", path: "/admin/system/maintenance" },
+    { key: "about", labelKey: "tabs.about", defaultLabel: "About", path: "/admin/system/about" },
+];
+
+const AdminSystemPageLayout = React.memo(function AdminSystemPageLayout({ activeTab, children }) {
+    const { t } = useTranslation('settings');
+    const navigate = useNavigate();
+
+    const handleTabChange = (_event, nextTab) => {
+        if (nextTab === activeTab) {
+            return;
+        }
+
+        const tabDefinition = ADMIN_SYSTEM_TABS.find((tab) => tab.key === nextTab);
+        if (tabDefinition) {
+            navigate(tabDefinition.path);
+        }
+    };
+
+    return (
+        <Box sx={{ flexGrow: 1, bgcolor: 'background.paper' }}>
+            <AntTabs
+                value={activeTab}
+                onChange={handleTabChange}
+                aria-label={t('tabs.settings')}
+                scrollButtons={true}
+                variant="scrollable"
+                allowScrollButtonsMobile
+                sx={getSettingsTabRowSx('detailRow')}
+            >
+                {ADMIN_SYSTEM_TABS.map((tab) => (
+                    <AntTab
+                        key={tab.key}
+                        value={tab.key}
+                        label={t(tab.labelKey, { defaultValue: tab.defaultLabel })}
+                    />
+                ))}
+            </AntTabs>
+            {children}
+        </Box>
+    );
+});
 
 const tabsTree = {
     "hardware": ["rigcontrol", "rotatorcontrol", "sdrs"],

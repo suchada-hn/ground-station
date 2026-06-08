@@ -335,7 +335,7 @@ export const getNavigation = ({ showCelestial = false } = {}) => {
             icon: <LocationOnIcon/>,
         },
         {
-            segment: 'admin/system/hardware/rigs',
+            segment: 'admin/system/hardware',
             title: i18n.t('hardware', { ns: 'navigation' }),
             icon: <MemoryIcon/>,
         },
