@@ -22,10 +22,14 @@ import {
     Box,
     Button,
     ButtonGroup,
+    Chip,
+    Divider,
     Dialog,
     DialogActions,
     DialogContent,
     DialogTitle,
+    Fab,
+    LinearProgress,
     Skeleton,
     Step,
     StepLabel,
@@ -36,15 +40,20 @@ import {
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import Grid from '@mui/material/Grid';
+import ZoomInIcon from '@mui/icons-material/ZoomIn';
+import ZoomOutIcon from '@mui/icons-material/ZoomOut';
+import CloudDoneIcon from '@mui/icons-material/CloudDone';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
+import SyncIcon from '@mui/icons-material/Sync';
 import { useTranslation } from 'react-i18next';
-import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMapEvents } from 'react-leaflet';
+import Map, { Layer, Marker, Source } from 'react-map-gl/maplibre';
+import maplibregl from 'maplibre-gl';
 import { useDispatch, useSelector } from 'react-redux';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { toast } from '../../utils/toast-with-timestamp.jsx';
 import { getMaidenhead } from '../common/common.jsx';
 import { useSocket } from '../common/socket.jsx';
-import { getTileLayerById } from '../common/tile-layers.jsx';
+import { getMapLibreTileURL, getTileLayerById } from '../common/tile-layers.jsx';
 import {
     SettingsActionFooter,
     SettingsSection,
@@ -60,55 +69,8 @@ import {
     setQth,
     storeLocation,
 } from './location-slice.jsx';
-
-const createCustomIcon = () => {
-    const svgIcon = `
-        <svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                <filter id="dropshadow" x="-50%" y="-50%" width="200%" height="200%">
-                    <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
-                    <feOffset dx="3" dy="5" result="offset"/>
-                    <feFlood flood-color="#000000" flood-opacity="0.6"/>
-                    <feComposite in2="offset" operator="in"/>
-                    <feMerge>
-                        <feMergeNode/>
-                        <feMergeNode in="SourceGraphic"/>
-                    </feMerge>
-                </filter>
-            </defs>
-            <path d="M12.5 0C5.597 0 0 5.597 0 12.5c0 12.5 12.5 28.5 12.5 28.5s12.5-16 12.5-28.5C25 5.597 19.403 0 12.5 0z"
-                  fill="#3388ff"
-                  filter="url(#dropshadow)"/>
-            <circle cx="12.5" cy="12.5" r="5" fill="white"/>
-        </svg>
-    `;
-
-    return L.icon({
-        iconUrl: `data:image/svg+xml;base64,${btoa(svgIcon)}`,
-        iconSize: [25, 41],
-        iconAnchor: [12, 41],
-        popupAnchor: [1, -34],
-        shadowUrl: null,
-        shadowSize: null,
-        shadowAnchor: null,
-    });
-};
-
-const setupMarkerIcons = () => {
-    try {
-        delete L.Icon.Default.prototype._getIconUrl;
-        L.Icon.Default.mergeOptions({
-            iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-            iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-        });
-    } catch (error) {
-        console.warn('Failed to set up default marker icons:', error);
-    }
-};
-
-setupMarkerIcons();
-const customIcon = createCustomIcon();
+import { fetchSyncState } from '../satellites/synchronize-slice.jsx';
+import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 
 const locationCardSx = {
     backgroundColor: (theme) => (
@@ -118,10 +80,88 @@ const locationCardSx = {
     ),
 };
 
-function MapClickHandler({ onClick }) {
-    useMapEvents({ click: onClick });
-    return null;
-}
+const MAPLIBRE_LOCATION_MIN_ZOOM = 1;
+const MAPLIBRE_LOCATION_MAX_ZOOM = 10;
+const LOCATION_COVERAGE_RADIUS_METERS = 400000;
+const LOCATION_COVERAGE_STEPS = 96;
+const EARTH_RADIUS_METERS = 6371008.8;
+
+const createEmptyFeatureCollection = () => ({
+    type: 'FeatureCollection',
+    features: [],
+});
+
+const latLonToLngLat = (point) => {
+    if (!Array.isArray(point) || point.length < 2) return null;
+    const lat = Number(point[0]);
+    const lon = Number(point[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return [lon, lat];
+};
+
+const createCrosshairGeoJSON = (polylines) => {
+    if (!Array.isArray(polylines) || polylines.length === 0) {
+        return createEmptyFeatureCollection();
+    }
+
+    const features = polylines
+        .map((line) => {
+            const coordinates = (Array.isArray(line) ? line : [])
+                .map(latLonToLngLat)
+                .filter(Boolean);
+            if (coordinates.length < 2) return null;
+            return {
+                type: 'Feature',
+                geometry: { type: 'LineString', coordinates },
+            };
+        })
+        .filter(Boolean);
+
+    return {
+        type: 'FeatureCollection',
+        features,
+    };
+};
+
+const createCoverageGeoJSON = (location) => {
+    if (!location) return null;
+
+    const centerLat = Number(location.lat);
+    const centerLon = Number(location.lon);
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return null;
+
+    const latRad = (centerLat * Math.PI) / 180;
+    const lonRad = (centerLon * Math.PI) / 180;
+    const angularDistance = LOCATION_COVERAGE_RADIUS_METERS / EARTH_RADIUS_METERS;
+    const coordinates = [];
+
+    for (let index = 0; index <= LOCATION_COVERAGE_STEPS; index += 1) {
+        const bearing = (2 * Math.PI * index) / LOCATION_COVERAGE_STEPS;
+        const pointLat = Math.asin(
+            Math.sin(latRad) * Math.cos(angularDistance)
+            + Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(bearing)
+        );
+        const pointLon = lonRad + Math.atan2(
+            Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latRad),
+            Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(pointLat)
+        );
+        const normalizedLon = ((((pointLon * 180) / Math.PI) + 540) % 360) - 180;
+        coordinates.push([normalizedLon, (pointLat * 180) / Math.PI]);
+    }
+
+    return {
+        type: 'FeatureCollection',
+        features: [
+            {
+                type: 'Feature',
+                geometry: {
+                    type: 'Polygon',
+                    coordinates: [coordinates],
+                },
+            },
+        ],
+    };
+};
 
 const normalizeStationName = (value) => String(value || '').trim();
 const normalizeCallsign = (value) => String(value || '').trim().toUpperCase();
@@ -133,6 +173,7 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
     const { socket } = useSocket();
     const dispatch = useDispatch();
     const { t } = useTranslation('settings');
+    const { locale } = useUserTimeSettings();
 
     const [nearestCity, setNearestCity] = React.useState(null);
     const [cityLoading, setCityLoading] = React.useState(false);
@@ -154,6 +195,12 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
         polylines,
         altitude,
     } = useSelector((state) => state.location);
+    const {
+        syncState,
+        synchronizing,
+        status: syncStatus,
+        error: syncError,
+    } = useSelector((state) => state.syncSatellite);
 
     const hasLocation = location && location.lat != null && location.lon != null;
     const stationName = location?.name || '';
@@ -188,13 +235,14 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
     };
 
     const reCenterMap = (lat, lon) => {
-        if (mapRef.current) {
-            mapRef.current.setView([lat, lon], mapRef.current.getZoom());
+        const liveMap = mapRef.current?.getMap?.();
+        if (liveMap) {
+            liveMap.flyTo({
+                center: [lon, lat],
+                zoom: liveMap.getZoom(),
+                essential: false,
+            });
         }
-    };
-
-    const handleWhenReady = (map) => {
-        mapRef.current = map.target;
     };
 
     useEffect(() => {
@@ -223,8 +271,9 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
     }, [dispatch, hasLocation, normalizedLocation]);
 
     useEffect(() => {
-        if (mapRef.current && hasLocation) {
-            mapRef.current.invalidateSize();
+        if (hasLocation) {
+            const liveMap = mapRef.current?.getMap?.();
+            liveMap?.resize?.();
             reCenterMap(normalizedLocation.lat, normalizedLocation.lon);
         }
     }, [hasLocation, normalizedLocation]);
@@ -301,16 +350,167 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
 
     const mapCenter = hasLocation ? [normalizedLocation.lat, normalizedLocation.lon] : [20, 0];
     const mapZoom = hasLocation ? 5 : 2;
+    const selectedTileLayer = React.useMemo(
+        () => getTileLayerById('satellite', { mapEngine: 'maplibre' }),
+        []
+    );
+    const selectedTileURL = React.useMemo(
+        () => getMapLibreTileURL('satellite', { mapEngine: 'maplibre' }),
+        []
+    );
+    const mapStyle = React.useMemo(() => ({
+        version: 8,
+        sources: {
+            basemap: {
+                type: 'raster',
+                tiles: [selectedTileURL],
+                tileSize: 256,
+                attribution: selectedTileLayer.attribution,
+            },
+        },
+        layers: [
+            {
+                id: 'location-basemap',
+                type: 'raster',
+                source: 'basemap',
+            },
+        ],
+    }), [selectedTileLayer.attribution, selectedTileURL]);
+    const crosshairGeoJSON = React.useMemo(
+        () => createCrosshairGeoJSON(polylines),
+        [polylines]
+    );
+    const coverageGeoJSON = React.useMemo(
+        () => createCoverageGeoJSON(normalizedLocation),
+        [normalizedLocation]
+    );
     const wizardSteps = [
         t('location.wizard_step_identity', { defaultValue: 'Station Identity' }),
         t('location.wizard_step_coordinates', { defaultValue: 'Coordinates & Map' }),
         t('location.wizard_step_review', { defaultValue: 'Review & Save' }),
     ];
+    const coordinateNumberFormatter = React.useMemo(
+        () => new Intl.NumberFormat(locale, {
+            minimumFractionDigits: 6,
+            maximumFractionDigits: 6,
+            useGrouping: false,
+        }),
+        [locale]
+    );
+    const formatCoordinateDisplay = React.useCallback((value, axis) => {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) {
+            return t('location.state_unavailable', { defaultValue: 'Unavailable' });
+        }
+
+        const absoluteValue = coordinateNumberFormatter.format(Math.abs(numericValue));
+        const hemisphere = axis === 'lat'
+            ? (numericValue >= 0 ? 'N' : 'S')
+            : (numericValue >= 0 ? 'E' : 'W');
+        return `${absoluteValue}° ${hemisphere}`;
+    }, [coordinateNumberFormatter, t]);
+    const formatCoordinateOverlay = React.useCallback((value, axis) => {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) return '---';
+
+        const absoluteValue = coordinateNumberFormatter.format(Math.abs(numericValue));
+        const hemisphere = axis === 'lat'
+            ? (numericValue >= 0 ? 'N' : 'S')
+            : (numericValue >= 0 ? 'E' : 'W');
+        return `${absoluteValue}° ${hemisphere}`;
+    }, [coordinateNumberFormatter]);
     const isWizardLastStep = wizardStep === WIZARD_STEP_REVIEW;
     const canAdvanceWizard = wizardStep !== WIZARD_STEP_COORDINATES || hasLocation;
+    const syncLastUpdateText = React.useMemo(() => {
+        if (!syncState?.last_update) {
+            return t('location.state_unavailable', { defaultValue: 'Unavailable' });
+        }
 
-    const handleMapClick = async (e) => {
-        const { lat, lng } = e.latlng;
+        const timestamp = new Date(syncState.last_update);
+        if (Number.isNaN(timestamp.getTime())) {
+            return String(syncState.last_update);
+        }
+
+        return timestamp.toLocaleString();
+    }, [syncState?.last_update, t]);
+    const orbitalSyncUiState = React.useMemo(() => {
+        const rawStatus = String(syncState?.status || '').toLowerCase();
+        const normalizedStatus = (
+            rawStatus === 'in_progress' || rawStatus === 'inprogress' || rawStatus === 'started'
+        )
+            ? 'inprogress'
+            : rawStatus;
+        const hasErrors = Array.isArray(syncState?.errors) && syncState.errors.length > 0;
+        const primaryError = hasErrors
+            ? syncState.errors[0]
+            : (syncError || null);
+
+        if (normalizedStatus === 'inprogress' || synchronizing) {
+            const progressValue = Number.isFinite(Number(syncState?.progress))
+                ? Number(syncState?.progress)
+                : 0;
+            return {
+                label: t('location.orbital_sync_in_progress', { defaultValue: 'Synchronization in progress' }),
+                color: 'info',
+                icon: <SyncIcon />,
+                progress: Math.max(0, Math.min(100, progressValue)),
+                error: null,
+            };
+        }
+
+        if ((normalizedStatus === 'complete' && syncState?.success === false) || hasErrors || primaryError) {
+            return {
+                label: t('location.orbital_sync_failed', { defaultValue: 'Synchronization failed' }),
+                color: 'error',
+                icon: <CloudOffIcon />,
+                progress: null,
+                error: primaryError || t('location.state_unavailable', { defaultValue: 'Unavailable' }),
+            };
+        }
+
+        if (normalizedStatus === 'complete' && syncState?.success === true) {
+            return {
+                label: t('location.orbital_sync_ok', { defaultValue: 'Synchronization complete' }),
+                color: 'success',
+                icon: <CloudDoneIcon />,
+                progress: null,
+                error: null,
+            };
+        }
+
+        return {
+            label: t('location.orbital_sync_idle', { defaultValue: 'Synchronization status unavailable' }),
+            color: 'default',
+            icon: <CloudOffIcon />,
+            progress: null,
+            error: null,
+        };
+    }, [
+        syncState?.errors,
+        syncState?.progress,
+        syncState?.status,
+        syncState?.success,
+        syncError,
+        synchronizing,
+        t,
+    ]);
+
+    useEffect(() => {
+        if (!wizardMode || wizardStep !== WIZARD_STEP_REVIEW || !socket || !socket.connected) {
+            return;
+        }
+
+        dispatch(fetchSyncState({ socket }));
+    }, [dispatch, socket, wizardMode, wizardStep]);
+
+    const handleMapClick = async (event) => {
+        const lngLat = event?.lngLat;
+        if (!lngLat) return;
+
+        const lat = Number(lngLat.lat);
+        const lng = Number(lngLat.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
         updateLocationState({ lat, lon: lng });
         dispatch(setQth(getMaidenhead(lat, lng)));
         reCenterMap(lat, lng);
@@ -319,6 +519,24 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
         const city = await getNearestCity(lat, lng);
         setNearestCity(city);
         setCityLoading(false);
+    };
+
+    const handleZoomIn = () => {
+        const liveMap = mapRef.current?.getMap?.();
+        if (!liveMap) return;
+        liveMap.easeTo({
+            zoom: Math.min(MAPLIBRE_LOCATION_MAX_ZOOM, liveMap.getZoom() + 0.25),
+            duration: 120,
+        });
+    };
+
+    const handleZoomOut = () => {
+        const liveMap = mapRef.current?.getMap?.();
+        if (!liveMap) return;
+        liveMap.easeTo({
+            zoom: Math.max(MAPLIBRE_LOCATION_MIN_ZOOM, liveMap.getZoom() - 0.25),
+            duration: 120,
+        });
     };
 
     const getCurrentLocation = async () => {
@@ -542,13 +760,17 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
                     <Grid size={{ xs: 12, sm: 6 }}>
                         <Typography variant="caption" color="text.secondary">{t('location.latitude')}</Typography>
                         <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 600, color: 'text.primary' }}>
-                            {hasLocation ? `${normalizedLocation.lat.toFixed(6)}deg` : t('location.state_unavailable', { defaultValue: 'Unavailable' })}
+                            {hasLocation
+                                ? formatCoordinateDisplay(normalizedLocation.lat, 'lat')
+                                : t('location.state_unavailable', { defaultValue: 'Unavailable' })}
                         </Typography>
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                         <Typography variant="caption" color="text.secondary">{t('location.longitude')}</Typography>
                         <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 600, color: 'text.primary' }}>
-                            {hasLocation ? `${normalizedLocation.lon.toFixed(6)}deg` : t('location.state_unavailable', { defaultValue: 'Unavailable' })}
+                            {hasLocation
+                                ? formatCoordinateDisplay(normalizedLocation.lon, 'lon')
+                                : t('location.state_unavailable', { defaultValue: 'Unavailable' })}
                         </Typography>
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
@@ -645,6 +867,90 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
         </SettingsSection>
     );
 
+    const locationMap = (
+        <Map
+            ref={mapRef}
+            mapLib={maplibregl}
+            mapStyle={mapStyle}
+            initialViewState={{
+                latitude: mapCenter[0],
+                longitude: mapCenter[1],
+                zoom: mapZoom,
+            }}
+            minZoom={MAPLIBRE_LOCATION_MIN_ZOOM}
+            maxZoom={MAPLIBRE_LOCATION_MAX_ZOOM}
+            attributionControl={false}
+            onClick={handleMapClick}
+            style={{ height: '100%', width: '100%' }}
+        >
+            {crosshairGeoJSON.features.length > 0 && (
+                <Source id="location-crosshair-source" type="geojson" data={crosshairGeoJSON}>
+                    <Layer
+                        id="location-crosshair-layer"
+                        type="line"
+                        paint={{
+                            'line-color': '#ffffff',
+                            'line-opacity': 0.8,
+                            'line-width': 1,
+                            'line-dasharray': [2, 2],
+                        }}
+                    />
+                </Source>
+            )}
+
+            {coverageGeoJSON && (
+                <Source id="location-coverage-source" type="geojson" data={coverageGeoJSON}>
+                    <Layer
+                        id="location-coverage-layer"
+                        type="line"
+                        paint={{
+                            'line-color': '#ffffff',
+                            'line-opacity': 0.8,
+                            'line-width': 1,
+                            'line-dasharray': [2, 2],
+                        }}
+                    />
+                </Source>
+            )}
+
+            {hasLocation && (
+                <Marker longitude={normalizedLocation.lon} latitude={normalizedLocation.lat} anchor="center">
+                    <Box
+                        sx={{
+                            width: 16,
+                            height: 16,
+                            borderRadius: '50%',
+                            border: '2px solid #fff',
+                            backgroundColor: '#3388ff',
+                            boxShadow: '0 0 0 2px rgba(0, 0, 0, 0.35)',
+                        }}
+                    />
+                </Marker>
+            )}
+        </Map>
+    );
+
+    const mapZoomControls = (
+        <Box
+            sx={{
+                '& > :not(style)': { m: 1 },
+                display: 'flex',
+                flexDirection: 'column',
+                position: 'absolute',
+                left: 5,
+                top: 5,
+                zIndex: 500,
+            }}
+        >
+            <Fab size="small" color="primary" aria-label={t('map_controls.zoom_in', { defaultValue: 'Zoom in' })} onClick={handleZoomIn}>
+                <ZoomInIcon />
+            </Fab>
+            <Fab size="small" color="primary" aria-label={t('map_controls.zoom_out', { defaultValue: 'Zoom out' })} onClick={handleZoomOut}>
+                <ZoomOutIcon />
+            </Fab>
+        </Box>
+    );
+
     const mapSection = (
         <SettingsSection
             title={t('location.map_section_title', { defaultValue: 'Map Selection' })}
@@ -661,65 +967,13 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
                     border: '1px solid',
                     borderColor: 'divider',
                     boxShadow: 1,
+                    '& .maplibregl-ctrl-attrib, & .maplibregl-ctrl-bottom-right': {
+                        display: 'none !important',
+                    },
                 }}
             >
-                <MapContainer
-                    center={mapCenter}
-                    zoom={mapZoom}
-                    maxZoom={10}
-                    minZoom={1}
-                    dragging
-                    whenReady={handleWhenReady}
-                    style={{ height: '100%', width: '100%' }}
-                >
-                    <TileLayer
-                        url={getTileLayerById('satellite').url}
-                        attribution="Map tiles by Carto, under CC BY 3.0. Data by OpenStreetMap, under ODbL."
-                    />
-                    <MapClickHandler onClick={handleMapClick} />
-
-                    {hasLocation && (
-                        <Marker position={normalizedLocation} icon={customIcon}>
-                            <Popup>
-                                {stationCallsignLabel
-                                    ? `${stationLabel} (${stationCallsignLabel})`
-                                    : stationLabel}
-                            </Popup>
-                        </Marker>
-                    )}
-
-                    {hasLocation && polylines.map((polyline, index) => (
-                        <Polyline
-                            key={index}
-                            positions={polyline}
-                            color="white"
-                            opacity={0.8}
-                            lineCap="round"
-                            lineJoin="round"
-                            dashArray="2, 2"
-                            dashOffset="10"
-                            interactive={false}
-                            smoothFactor={1}
-                            noClip={false}
-                            className="leaflet-interactive"
-                            weight={1}
-                        />
-                    ))}
-
-                    {hasLocation && (
-                        <Circle
-                            center={normalizedLocation}
-                            radius={400000}
-                            pathOptions={{
-                                color: 'white',
-                                fillOpacity: 0,
-                                weight: 1,
-                                opacity: 0.8,
-                                dashArray: '2, 2',
-                            }}
-                        />
-                    )}
-                </MapContainer>
+                {locationMap}
+                {mapZoomControls}
             </Box>
 
             {!hasLocation && (
@@ -748,65 +1002,13 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
                     borderColor: 'divider',
                     boxShadow: 1,
                     overflow: 'hidden',
+                    '& .maplibregl-ctrl-attrib, & .maplibregl-ctrl-bottom-right': {
+                        display: 'none !important',
+                    },
                 }}
             >
-                <MapContainer
-                    center={mapCenter}
-                    zoom={mapZoom}
-                    maxZoom={10}
-                    minZoom={1}
-                    dragging
-                    whenReady={handleWhenReady}
-                    style={{ height: '100%', width: '100%' }}
-                >
-                    <TileLayer
-                        url={getTileLayerById('satellite').url}
-                        attribution="Map tiles by Carto, under CC BY 3.0. Data by OpenStreetMap, under ODbL."
-                    />
-                    <MapClickHandler onClick={handleMapClick} />
-
-                    {hasLocation && (
-                        <Marker position={normalizedLocation} icon={customIcon}>
-                            <Popup>
-                                {stationCallsignLabel
-                                    ? `${stationLabel} (${stationCallsignLabel})`
-                                    : stationLabel}
-                            </Popup>
-                        </Marker>
-                    )}
-
-                    {hasLocation && polylines.map((polyline, index) => (
-                        <Polyline
-                            key={index}
-                            positions={polyline}
-                            color="white"
-                            opacity={0.8}
-                            lineCap="round"
-                            lineJoin="round"
-                            dashArray="2, 2"
-                            dashOffset="10"
-                            interactive={false}
-                            smoothFactor={1}
-                            noClip={false}
-                            className="leaflet-interactive"
-                            weight={1}
-                        />
-                    ))}
-
-                    {hasLocation && (
-                        <Circle
-                            center={normalizedLocation}
-                            radius={400000}
-                            pathOptions={{
-                                color: 'white',
-                                fillOpacity: 0,
-                                weight: 1,
-                                opacity: 0.8,
-                                dashArray: '2, 2',
-                            }}
-                        />
-                    )}
-                </MapContainer>
+                {locationMap}
+                {mapZoomControls}
 
                 <Box
                     sx={{
@@ -830,12 +1032,9 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
                         }}
                     >
                         <Stack spacing={0.9}>
-                            <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Stack direction="row" alignItems="center">
                                 <Typography variant="caption" color="text.secondary">
                                     {t('location.station_summary', { defaultValue: 'Station' })}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                    {statusLabel}
                                 </Typography>
                             </Stack>
                             <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
@@ -847,13 +1046,13 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
                                 <Grid size={6}>
                                     <Typography variant="caption" color="text.secondary">{t('location.latitude')}</Typography>
                                     <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', color: 'text.primary' }}>
-                                        {hasLocation ? normalizedLocation.lat.toFixed(6) : '---'}
+                                        {hasLocation ? formatCoordinateOverlay(normalizedLocation.lat, 'lat') : '---'}
                                     </Typography>
                                 </Grid>
                                 <Grid size={6}>
                                     <Typography variant="caption" color="text.secondary">{t('location.longitude')}</Typography>
                                     <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', color: 'text.primary' }}>
-                                        {hasLocation ? normalizedLocation.lon.toFixed(6) : '---'}
+                                        {hasLocation ? formatCoordinateOverlay(normalizedLocation.lon, 'lon') : '---'}
                                     </Typography>
                                 </Grid>
                                 <Grid size={6}>
@@ -968,6 +1167,45 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
                     </Typography>
                 </Grid>
             </Grid>
+            <Divider sx={{ my: 1.75 }} />
+            <Stack spacing={1.1}>
+                <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>
+                    {t('location.orbital_sync_title', { defaultValue: 'Orbital Data Sync' })}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                    {t('location.orbital_sync_review_help', {
+                        defaultValue: 'Current backend synchronization state for orbital data.',
+                    })}
+                </Typography>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                    <Chip
+                        size="small"
+                        color={orbitalSyncUiState.color}
+                        icon={orbitalSyncUiState.icon}
+                        label={orbitalSyncUiState.label}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                        {t('location.orbital_sync_last_update', { defaultValue: 'Last update' })}: {syncLastUpdateText}
+                    </Typography>
+                </Stack>
+                {orbitalSyncUiState.progress != null && (
+                    <LinearProgress
+                        variant="determinate"
+                        value={orbitalSyncUiState.progress}
+                        sx={{ height: 8, borderRadius: 1 }}
+                    />
+                )}
+                {orbitalSyncUiState.error && (
+                    <Typography variant="caption" color="error.main">
+                        {orbitalSyncUiState.error}
+                    </Typography>
+                )}
+                {syncStatus === 'loading' && (
+                    <Typography variant="caption" color="text.secondary">
+                        {t('location.state_loading', { defaultValue: 'Loading...' })}
+                    </Typography>
+                )}
+            </Stack>
         </SettingsSection>
     );
 
@@ -1079,7 +1317,7 @@ const LocationPage = ({ wizardMode = false, onWizardCompleted = null }) => {
             )}
 
             <SettingsActionFooter
-                statusText={statusLabel}
+                statusText=""
                 mobileInline
                 sx={{
                     backgroundColor: (theme) => (

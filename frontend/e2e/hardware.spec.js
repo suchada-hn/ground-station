@@ -3,14 +3,10 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { ensureLocationIsConfigured } from './location-helpers.js';
 
 const ensureLocationIsSet = async (page) => {
-  await page.goto('/settings/location');
-  await page.waitForLoadState('domcontentloaded');
-  const saveButton = page.getByRole('button', { name: /save location/i });
-  await saveButton.waitFor({ state: 'visible' });
-  await saveButton.click();
-  await page.waitForTimeout(1000);
+  await ensureLocationIsConfigured(page);
 };
 
 const openAddDialogWithLocationFallback = async (page) => {

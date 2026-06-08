@@ -13,7 +13,7 @@ test.describe('Satellite Tracking', () => {
 
   test('should display satellite map', async ({ page }) => {
     // Wait for map container to be visible
-    const mapContainer = page.locator('.leaflet-container');
+    const mapContainer = page.locator('.leaflet-container, .maplibregl-canvas').first();
     await expect(mapContainer).toBeVisible({ timeout: 10000 });
   });
 
@@ -57,7 +57,7 @@ test.describe('Satellite Overview', () => {
 
   test('should display birds eye view map', async ({ page }) => {
     // Check for map in overview
-    const mapContainer = page.locator('.leaflet-container');
+    const mapContainer = page.locator('.leaflet-container, .maplibregl-canvas').first();
     await expect(mapContainer).toBeVisible({ timeout: 10000 });
   });
 });
