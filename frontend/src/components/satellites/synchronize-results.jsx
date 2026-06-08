@@ -2,7 +2,7 @@ import React from 'react';
 import {Box, Typography} from '@mui/material';
 import Grid from '@mui/material/Grid';
 import AddedItemsTable from './synchronize-added.jsx';
-import ModifiedItemsTable from './synchronize-modifed.jsx';
+import ModifiedItemsTable from './synchronize-modified.jsx';
 import RemovedItemsTable from './synchronize-removed.jsx';
 import PropTypes from 'prop-types';
 

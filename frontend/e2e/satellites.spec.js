@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('TLE Sources', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/satellites/orbital-sources');
+    await page.goto('/admin/satellites/sources');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -14,7 +14,7 @@ test.describe('TLE Sources', () => {
     await page.waitForTimeout(2000);
 
     // Verify we're on the TLE sources page
-    expect(page.url()).toContain('/satellites/orbital-sources');
+    expect(page.url()).toContain('/admin/satellites/sources');
   });
 
   test('should have TLE source management controls', async ({ page }) => {
@@ -43,7 +43,7 @@ test.describe('TLE Sources', () => {
 
 test.describe('Satellites Management', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/satellites/satellites');
+    await page.goto('/admin/satellites/catalog');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -51,7 +51,7 @@ test.describe('Satellites Management', () => {
     await page.waitForTimeout(2000);
 
     // Verify we're on the satellites page
-    expect(page.url()).toContain('/satellites/satellites');
+    expect(page.url()).toContain('/admin/satellites/catalog');
   });
 
   test('should have satellite list or grid', async ({ page }) => {
@@ -86,13 +86,13 @@ test.describe('Satellites Management', () => {
     await expect(content).toBeVisible();
 
     // Page should be loaded
-    expect(page.url()).toContain('/satellites/satellites');
+    expect(page.url()).toContain('/admin/satellites/catalog');
   });
 });
 
 test.describe('Satellite Groups', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/satellites/groups');
+    await page.goto('/admin/satellites/groups');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -135,19 +135,19 @@ test.describe('Satellite Groups', () => {
 test.describe('Satellite Navigation Flow', () => {
   test('should navigate between satellite pages', async ({ page }) => {
     // TLE Sources
-    await page.goto('/satellites/orbital-sources');
+    await page.goto('/admin/satellites/sources');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/satellites/orbital-sources');
+    expect(page.url()).toContain('/admin/satellites/sources');
 
     // Satellites
-    await page.goto('/satellites/satellites');
+    await page.goto('/admin/satellites/catalog');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/satellites/satellites');
+    expect(page.url()).toContain('/admin/satellites/catalog');
 
     // Groups
-    await page.goto('/satellites/groups');
+    await page.goto('/admin/satellites/groups');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/satellites/groups');
+    expect(page.url()).toContain('/admin/satellites/groups');
   });
 
 });
@@ -155,17 +155,17 @@ test.describe('Satellite Navigation Flow', () => {
 test.describe('Satellite Info Page', () => {
   test('should handle direct satellite info navigation with NORAD ID', async ({ page }) => {
     // Test with a common satellite NORAD ID (ISS = 25544)
-    await page.goto('/satellite/25544');
+    await page.goto('/satellites/25544');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
 
     // Should navigate to satellite info page
-    expect(page.url()).toContain('/satellite/25544');
+    expect(page.url()).toContain('/satellites/25544');
   });
 
   test('should display satellite information when valid NORAD ID provided', async ({ page }) => {
     // Navigate to a satellite info page
-    await page.goto('/satellite/25544');
+    await page.goto('/satellites/25544');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
 
@@ -177,7 +177,7 @@ test.describe('Satellite Info Page', () => {
 
 test.describe('Satellite List CRUD', () => {
   test('should allow adding, editing, and deleting a satellite', async ({ page }) => {
-    await page.goto('/satellites/satellites');
+    await page.goto('/admin/satellites/catalog');
     await page.waitForLoadState('domcontentloaded');
 
     // Keep a deterministic 5-digit NORAD ID to avoid invalid values.
@@ -233,7 +233,7 @@ test.describe('Satellite List CRUD', () => {
 
 test.describe('TLE Sources CRUD', () => {
   test('should allow adding, editing, and deleting a TLE source', async ({ page }) => {
-    await page.goto('/satellites/orbital-sources');
+    await page.goto('/admin/satellites/sources');
     await page.waitForLoadState('domcontentloaded');
 
     const sourceName = `E2E Source ${Date.now()}`;
@@ -273,7 +273,7 @@ test.describe('TLE Sources CRUD', () => {
 
 test.describe('Satellite Groups CRUD', () => {
   test('should allow adding and deleting a satellite group', async ({ page }) => {
-    await page.goto('/satellites/groups');
+    await page.goto('/admin/satellites/groups');
     await page.waitForLoadState('domcontentloaded');
 
     const groupName = `E2E Group ${Date.now()}`;

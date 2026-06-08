@@ -114,7 +114,7 @@ const ThemedDiv = styled('div')(({theme}) => ({
     backgroundColor: theme.palette.background.paper,
 }));
 
-const GlobalSatelliteTrackLayout = React.memo(function GlobalSatelliteTrackLayout() {
+const OverviewLayout = React.memo(function OverviewLayout() {
     const {socket} = useSocket();
     const dispatch = useDispatch();
     const {t} = useTranslation('overview');
@@ -533,4 +533,4 @@ const GlobalSatelliteTrackLayout = React.memo(function GlobalSatelliteTrackLayou
     );
 });
 
-export default GlobalSatelliteTrackLayout;
+export default OverviewLayout;

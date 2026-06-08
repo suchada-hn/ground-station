@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Satellite Tracking', () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to the tracking console
-    await page.goto('/track');
+    await page.goto('/tracking');
     await page.waitForLoadState('networkidle');
   });
 

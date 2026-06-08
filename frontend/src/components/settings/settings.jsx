@@ -42,7 +42,6 @@ import SatelliteGroupsTable from "../satellites/groups-table.jsx";
 import LocationPage from "./location-form.jsx";
 import PreferencesForm from "./preferences-form.jsx";
 import MaintenanceForm from "./maintenance-form.jsx";
-import CameraTable from "../hardware/camera-table.jsx";
 import {AntTab, AntTabs} from "../common/common.jsx";
 import SDRsPage from "../hardware/sdr-table.jsx";
 import AppSettingsForm from "./app-settings-form.jsx";
@@ -82,7 +81,7 @@ export function SettingsTabIntegrations() {
     );
 }
 
-export function SettingsTabSettings() {
+export function SettingsTabGeneral() {
     return (
         <SettingsTabs
             initialMainTab={"settings"}
@@ -110,10 +109,6 @@ export function SettingsTabRotator() {
     return (<SettingsTabs initialMainTab={"hardware"} initialTab={"rotatorcontrol"}/>);
 }
 
-export function SettingsTabCamera() {
-    return (<SettingsTabs initialMainTab={"hardware"} initialTab={"camera"}/>);
-}
-
 export function SettingsTabSDR() {
     return (<SettingsTabs initialMainTab={"hardware"} initialTab={"sdrs"}/>);
 }
@@ -127,8 +122,48 @@ export function SettingsTabAbout () {
     return (<SettingsTabs initialMainTab={"settings"} initialTab={"about"}/>);
 }
 
+export function AdminSatellitesSourcesPage() {
+    return <OrbitalSourcesForm />;
+}
+
+export function AdminSatellitesCatalogPage() {
+    return <SatellitesForm />;
+}
+
+export function AdminSatellitesGroupsPage() {
+    return <SatelliteGroupsForm />;
+}
+
+export function AdminSystemGeneralPage() {
+    return <AppSettingsForm />;
+}
+
+export function AdminSystemPreferencesPage() {
+    return <PreferencesForm mode="preferences" />;
+}
+
+export function AdminSystemIntegrationsPage() {
+    return <PreferencesForm mode="integrations" />;
+}
+
+export function AdminSystemLocationPage() {
+    return <LocationPage />;
+}
+
+export function AdminSystemHardwarePage() {
+    return <AdminSystemHardwareTabs />;
+}
+
+export function AdminSystemMaintenancePage() {
+    return <MaintenanceForm />;
+}
+
+export function AdminSystemAboutPage() {
+    return <AboutPage />;
+}
+
 const tabsTree = {
-    "hardware": ["rigcontrol", "rotatorcontrol", /* "camera", */ "sdrs"],
+    "hardware": ["rigcontrol", "rotatorcontrol", "sdrs"],
     "satellites": ["satellites", "orbitalsources", "groups"],
     "settings": ["settings", "maintenance", "users", "about"],
 };
@@ -194,24 +229,24 @@ export const SettingsTabs = React.memo(function SettingsTabs({
     const getTabFromPath = (pathname) => {
         switch (pathname) {
             case "/hardware/rig":
+            case "/hardware/rigs":
                 return "rigcontrol";
             case "/hardware/rotator":
+            case "/hardware/rotators":
                 return "rotatorcontrol";
-            case "/hardware/cameras":
-                return "camera";
             case "/hardware/sdrs":
                 return "sdrs";
             case "/satellites/orbital-sources":
-                return "orbitalsources";
+            case "/satellites/sources":
             case "/satellites/tlesources":
                 return "orbitalsources";
             case "/satellites/satellites":
+            case "/satellites/catalog":
                 return "satellites";
             case "/satellites/groups":
                 return "groups";
             case "/settings/backend":
-                return "settings";
-            // Backward-compatible alias for older deep links.
+            case "/settings/general":
             case "/settings/settings":
                 return "settings";
             case "/settings/preferences":
@@ -238,22 +273,21 @@ export const SettingsTabs = React.memo(function SettingsTabs({
     switch (activeMainTab) {
         case "hardware":
             tabsList = [
-                <AntTab key="rigcontrol" value="rigcontrol" label={t('tabs.rigs')} to="/hardware/rig" component={Link} />,
-                <AntTab key="rotatorcontrol" value="rotatorcontrol" label={t('tabs.rotators')} to="/hardware/rotator" component={Link} />,
-                // <AntTab key="camera" value="camera" label={t('tabs.cameras')} to="/hardware/cameras" component={Link} />,
+                <AntTab key="rigcontrol" value="rigcontrol" label={t('tabs.rigs')} to="/hardware/rigs" component={Link} />,
+                <AntTab key="rotatorcontrol" value="rotatorcontrol" label={t('tabs.rotators')} to="/hardware/rotators" component={Link} />,
                 <AntTab key="sdrs" value="sdrs" label={t('tabs.sdrs')} to="/hardware/sdrs" component={Link}/>,
             ];
             break;
         case "satellites":
             tabsList = [
-                <AntTab key="orbitalsources" value="orbitalsources" label={t('tabs.orbital_sources')} to="/satellites/orbital-sources" component={Link} />,
-                <AntTab key="satellites" value="satellites" label={t('tabs.satellite_list')} to="/satellites/satellites" component={Link} />,
+                <AntTab key="orbitalsources" value="orbitalsources" label={t('tabs.orbital_sources')} to="/satellites/sources" component={Link} />,
+                <AntTab key="satellites" value="satellites" label={t('tabs.catalog', { defaultValue: 'Catalog' })} to="/satellites/catalog" component={Link} />,
                 <AntTab key="groups" value="groups" label={t('tabs.groups')} to="/satellites/groups" component={Link} />,
             ];
             break;
         case "settings":
             tabsList = [
-                <AntTab key="settings" value="settings" label={t('tabs.settings')} to="/settings/backend" component={Link} />,
+                <AntTab key="settings" value="settings" label={t('tabs.general', { defaultValue: 'General' })} to="/settings/general" component={Link} />,
                 // <AntTab key="users" value="users" label="Users" to="/settings/users" component={Link} />,
                 <AntTab key="maintenance" value="maintenance" label={t('tabs.maintenance')} to="/settings/maintenance" component={Link} />,
                 <AntTab key="about" value="about" label={t('tabs.about')} to="/settings/about" component={Link} />,
@@ -298,9 +332,6 @@ export const SettingsTabs = React.memo(function SettingsTabs({
         case "rotatorcontrol":
             activeTabContent = <RotatorControlForm/>;
             break;
-        // case "camera":
-        //     activeTabContent = <CameraPage/>;
-        //     break;
         case "sdrs":
             activeTabContent = <SDRsPage/>;
             break;
@@ -333,9 +364,9 @@ export const SettingsTabs = React.memo(function SettingsTabs({
                  variant="fullWidth"
                  allowScrollButtonsMobile
              >
-                 <AntTab value={"hardware"} label={t('tabs.hardware')} to="/hardware/rig" component={Link}/>
-                 <AntTab value={"satellites"} label={t('tabs.satellites')} to="/satellites/satellites" component={Link}/>
-                 <AntTab value={"settings"} label={t('tabs.settings')} to="/settings/backend" component={Link}/>
+                 <AntTab value={"hardware"} label={t('tabs.hardware')} to="/hardware/rigs" component={Link}/>
+                 <AntTab value={"satellites"} label={t('tabs.satellites')} to="/satellites/catalog" component={Link}/>
+                 <AntTab value={"settings"} label={t('tabs.settings')} to="/settings/general" component={Link}/>
              </AntTabs>
              {tabObject}
              {activeTabContent}
@@ -347,14 +378,6 @@ const RotatorControlForm = () => {
 
     return (
         <AntennaRotatorTable/>
-    );
-};
-
-
-const CameraPage = () => {
-
-    return (
-        <CameraTable/>
     );
 };
 
@@ -390,6 +413,64 @@ const OrbitalSourcesForm = () => {
         </Paper>);
 };
 
+const AdminSystemHardwareTabs = React.memo(function AdminSystemHardwareTabs() {
+    const { t } = useTranslation('settings');
+    const location = useLocation();
+    const navigate = useNavigate();
+
+    const resolveHardwareTabFromPath = React.useCallback((pathname) => {
+        if (pathname === "/admin/system/hardware/rotators") return "rotators";
+        if (pathname === "/admin/system/hardware/sdrs") return "sdrs";
+        return "rigs";
+    }, []);
+
+    const [activeTab, setActiveTab] = React.useState(() => resolveHardwareTabFromPath(location.pathname));
+
+    React.useEffect(() => {
+        setActiveTab(resolveHardwareTabFromPath(location.pathname));
+    }, [location.pathname, resolveHardwareTabFromPath]);
+
+    const handleTabChange = (_event, nextTab) => {
+        if (nextTab === activeTab) {
+            return;
+        }
+        navigate(`/admin/system/hardware/${nextTab}`);
+    };
+
+    let content = null;
+    switch (activeTab) {
+        case "rotators":
+            content = <RotatorControlForm />;
+            break;
+        case "sdrs":
+            content = <SDRsPage />;
+            break;
+        case "rigs":
+        default:
+            content = <RigControlForm />;
+            break;
+    }
+
+    return (
+        <Box sx={{ flexGrow: 1, bgcolor: 'background.paper' }}>
+            <AntTabs
+                value={activeTab}
+                onChange={handleTabChange}
+                aria-label={t('tabs.hardware')}
+                scrollButtons={true}
+                variant="scrollable"
+                allowScrollButtonsMobile
+                sx={getSettingsTabRowSx('detailRow')}
+            >
+                <AntTab key="rigs" value="rigs" label={t('tabs.rigs')} />
+                <AntTab key="rotators" value="rotators" label={t('tabs.rotators')} />
+                <AntTab key="sdrs" value="sdrs" label={t('tabs.sdrs')} />
+            </AntTabs>
+            {content}
+        </Box>
+    );
+});
+
 const SettingsAndPreferencesForm = React.memo(function SettingsAndPreferencesForm({ initialSubTab }) {
     const { t } = useTranslation('settings');
     const location = useLocation();
@@ -397,6 +478,7 @@ const SettingsAndPreferencesForm = React.memo(function SettingsAndPreferencesFor
 
     const resolveSubTabFromPath = React.useCallback((pathname) => {
         if (pathname === "/settings/backend") return "settings";
+        if (pathname === "/settings/general") return "settings";
         // Backward-compatible alias for older deep links.
         if (pathname === "/settings/settings") return "settings";
         if (pathname === "/settings/preferences") return "preferences";
@@ -423,7 +505,7 @@ const SettingsAndPreferencesForm = React.memo(function SettingsAndPreferencesFor
             return;
         }
 
-        let nextPath = "/settings/backend";
+        let nextPath = "/settings/general";
         if (nextTab === "preferences") {
             nextPath = "/settings/preferences";
         } else if (nextTab === "integrations") {
@@ -448,7 +530,7 @@ const SettingsAndPreferencesForm = React.memo(function SettingsAndPreferencesFor
                 <AntTab key="preferences" value="preferences" label={t('tabs.preferences')} />
                 <AntTab key="integrations" value="integrations" label={t('tabs.integrations', { defaultValue: 'Integrations' })} />
                 <AntTab key="location" value="location" label={t('tabs.location')} />
-                <AntTab key="settings" value="settings" label={t('tabs.backend', { defaultValue: 'Backend' })} />
+                <AntTab key="settings" value="settings" label={t('tabs.general', { defaultValue: 'General' })} />
             </AntTabs>
             {(activeSubTab === "preferences" || activeSubTab === "integrations") ? <PreferencesForm mode={activeSubTab} /> : null}
             {activeSubTab === "location" ? <LocationPage/> : null}

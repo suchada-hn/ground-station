@@ -634,7 +634,7 @@ const AppSettingsForm = () => {
                             <Button
                                 size="small"
                                 sx={{ mt: 1 }}
-                                onClick={() => navigate('/settings/maintenance?mtab=system-control')}
+                                onClick={() => navigate('/admin/system/maintenance?mtab=system-control')}
                             >
                                 {t('app_settings.open_restart', { defaultValue: 'Open Maintenance' })}
                             </Button>

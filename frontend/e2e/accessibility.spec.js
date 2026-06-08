@@ -10,20 +10,37 @@ test.describe('Accessibility - Keyboard Navigation', () => {
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
 
-    // Press tab multiple times
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
+    let foundVisibleFocus = false;
 
-    // Check that focus moved to a visible element
-    const isFocusedVisible = await page.evaluate(() => {
-      const el = document.activeElement;
-      if (!el || el === document.body) return false;
-      const rect = el.getBoundingClientRect();
-      const style = window.getComputedStyle(el);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-    });
-    expect(isFocusedVisible).toBe(true);
+    // Tab through a bounded number of elements until a visible focused element is found.
+    // Focus traps and drawer sentinels can be present in the DOM but not visually rendered.
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press('Tab');
+
+      const isFocusedVisible = await page.evaluate(() => {
+        const el = document.activeElement;
+        if (!el || el === document.body) return false;
+
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        const ariaHidden = el.getAttribute('aria-hidden') === 'true';
+
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.visibility !== 'hidden' &&
+          style.display !== 'none' &&
+          !ariaHidden
+        );
+      });
+
+      if (isFocusedVisible) {
+        foundVisibleFocus = true;
+        break;
+      }
+    }
+
+    expect(foundVisibleFocus).toBe(true);
   });
 
   test('should allow Enter key to activate navigation links', async ({ page }) => {

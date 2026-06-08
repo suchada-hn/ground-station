@@ -27,7 +27,7 @@ function LocationWarningPopover() {
 
     const handleGoToSettings = () => {
         handleClose();
-        navigate('/settings/location');
+        navigate('/admin/system/location');
     };
 
     // Don't render if location is set

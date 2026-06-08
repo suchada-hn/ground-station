@@ -52,7 +52,7 @@ import {
     setOpenAddDialog,
     setFormValues,
     resetFormValues,
-} from './rotaror-slice.jsx';
+} from './rotator-slice.jsx';
 import Paper from "@mui/material/Paper";
 import {toRowSelectionModel, toSelectedIds} from '../../utils/datagrid-selection.js';
 import SelectionActionBar from './selection-action-bar.jsx';

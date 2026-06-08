@@ -537,7 +537,7 @@ const PreferencesForm = ({ mode = 'preferences' }) => {
                                     <Box sx={preferenceCardSx}>
                                         <PreferenceFieldHeading
                                             title={t('preferences.celestial_page')}
-                                            subtitle={t('preferences.celestial_page_help', { defaultValue: 'Show or hide the Celestial page while it is under development.' })}
+                                            subtitle={t('preferences.celestial_page_help', { defaultValue: 'Show or hide the Solar System page while it is under development.' })}
                                         />
                                         <FormControl fullWidth size="small" disabled={isSaving || isLoading}>
                                             <InputLabel>{t('preferences.celestial_page')}</InputLabel>

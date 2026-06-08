@@ -1208,7 +1208,7 @@ const MapLibreOverviewMapRenderer = ({handleSetTrackingOnBackend}) => {
                                                     <IconButton
                                                         onClick={(event) => {
                                                             event.stopPropagation();
-                                                            navigate(`/satellite/${marker.noradId}`);
+                                                            navigate(`/satellites/${marker.noradId}`);
                                                         }}
                                                         sx={{
                                                             backgroundColor: 'action.hover',

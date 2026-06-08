@@ -22,8 +22,7 @@ import { fetchVersionInfo } from "../components/dashboard/version-slice.jsx";
 import { fetchPreferences } from '../components/settings/preferences-slice.jsx';
 import { fetchLocationForUserId } from '../components/settings/location-slice.jsx';
 import { fetchRigs } from '../components/hardware/rig-slice.jsx';
-import { fetchRotators } from '../components/hardware/rotaror-slice.jsx';
-import { fetchCameras } from '../components/hardware/camera-slice.jsx';
+import { fetchRotators } from '../components/hardware/rotator-slice.jsx';
 import { fetchSDRs } from '../components/hardware/sdr-slice.jsx';
 import { fetchOrbitalSources } from '../components/satellites/sources-slice.jsx';
 import { fetchSatelliteGroups } from '../components/satellites/groups-slice.jsx';
@@ -70,7 +69,6 @@ export async function initializeAppData(socket) {
         },
         { name: 'rigs', run: () => store.dispatch(fetchRigs({ socket })) },
         { name: 'rotators', run: () => store.dispatch(fetchRotators({ socket })) },
-        { name: 'cameras', run: () => store.dispatch(fetchCameras({ socket })) },
         { name: 'sdrs', run: () => store.dispatch(fetchSDRs({ socket })) },
         { name: 'orbital_sources', run: () => store.dispatch(fetchOrbitalSources({ socket })) },
         { name: 'satellite_groups', run: () => store.dispatch(fetchSatelliteGroups({ socket })) },

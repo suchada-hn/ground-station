@@ -7,11 +7,11 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Smoke Tests', () => {
   test('should navigate to tracking console', async ({ page }) => {
-    await page.goto('/track');
+    await page.goto('/tracking');
     await page.waitForLoadState('networkidle');
 
     // Verify we're on the tracking page
-    expect(page.url()).toContain('/track');
+    expect(page.url()).toContain('/tracking');
   });
 
   test('should navigate to waterfall view', async ({ page }) => {

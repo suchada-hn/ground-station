@@ -31,7 +31,7 @@ test.describe('Network Error Handling', () => {
     await context.setOffline(true);
 
     // Try to navigate
-    await page.goto('/track').catch(() => {
+    await page.goto('/tracking').catch(() => {
       // Expected to fail
     });
 
@@ -56,7 +56,7 @@ test.describe('Network Error Handling', () => {
 
 test.describe('Form Validation', () => {
   test('should validate location input fields', async ({ page }) => {
-    await page.goto('/settings/location');
+    await page.goto('/admin/system/location');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
 
@@ -81,7 +81,7 @@ test.describe('Form Validation', () => {
 test.describe('Invalid Data Handling', () => {
   test('should handle invalid satellite NORAD ID', async ({ page }) => {
     // Try to access satellite info with invalid ID
-    await page.goto('/satellite/invalid-id');
+    await page.goto('/satellites/invalid-id');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
 
@@ -92,7 +92,7 @@ test.describe('Invalid Data Handling', () => {
 
   test('should handle non-existent satellite NORAD ID', async ({ page }) => {
     // Try to access satellite info with ID that doesn't exist
-    await page.goto('/satellite/999999999');
+    await page.goto('/satellites/999999999');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
 
@@ -108,7 +108,7 @@ test.describe('Browser Compatibility', () => {
     await page.waitForLoadState('networkidle');
 
     // Navigate to another page
-    await page.goto('/track');
+    await page.goto('/tracking');
     await page.waitForLoadState('networkidle');
 
     // Go back
@@ -116,14 +116,14 @@ test.describe('Browser Compatibility', () => {
     await page.waitForLoadState('networkidle');
 
     // Should be back at home
-    expect(page.url()).not.toContain('/track');
+    expect(page.url()).not.toContain('/tracking');
   });
 
   test('should handle browser forward button', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
 
-    await page.goto('/track');
+    await page.goto('/tracking');
     await page.waitForLoadState('networkidle');
 
     await page.goBack();
@@ -133,11 +133,11 @@ test.describe('Browser Compatibility', () => {
     await page.waitForLoadState('networkidle');
 
     // Should be back at track page
-    expect(page.url()).toContain('/track');
+    expect(page.url()).toContain('/tracking');
   });
 
   test('should handle page refresh', async ({ page }) => {
-    await page.goto('/track');
+    await page.goto('/tracking');
     await page.waitForLoadState('networkidle');
 
     // Refresh
@@ -145,7 +145,7 @@ test.describe('Browser Compatibility', () => {
     await page.waitForLoadState('networkidle');
 
     // Should still be on track page
-    expect(page.url()).toContain('/track');
+    expect(page.url()).toContain('/tracking');
   });
 });
 

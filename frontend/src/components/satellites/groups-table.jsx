@@ -98,7 +98,7 @@ const SatelliteChipsCell = ({ value, navigate }) => {
                     clickable
                     onClick={(e) => {
                         e.stopPropagation();
-                        navigate(`/satellite/${id}`);
+                        navigate(`/satellites/${id}`);
                     }}
                 />
             ))}

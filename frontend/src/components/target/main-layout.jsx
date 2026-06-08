@@ -45,7 +45,6 @@ import {
 } from './target-slice.jsx'
 import TargetInfoIsland from "./target-info-island.jsx";
 import NextPassesIsland from "./next-passes.jsx";
-import CameraView from "../common/camera-view.jsx";
 import {
     satellitePositionSelector,
     satelliteCoverageSelector,
@@ -273,7 +272,7 @@ const MapSlider = function ({handleSliderChange}) {
 }
 
 
-const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
+const TrackingLayout = React.memo(function TrackingLayout() {
     const {socket} = useSocket();
     const dispatch = useDispatch();
     const {t} = useTranslation('target');
@@ -670,9 +669,6 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
         <StyledIslandParentScrollbar key="rig-control">
             <RigControl/>
         </StyledIslandParentScrollbar>,
-        // <StyledIslandParentScrollbar key="video">
-        //     <CameraView/>
-        // </StyledIslandParentScrollbar>,
     ];
 
     const ResponsiveGridLayoutParent = mounted ? (
@@ -701,4 +697,4 @@ const TargetSatelliteLayout = React.memo(function TargetSatelliteLayout() {
     );
 });
 
-export default TargetSatelliteLayout;
+export default TrackingLayout;

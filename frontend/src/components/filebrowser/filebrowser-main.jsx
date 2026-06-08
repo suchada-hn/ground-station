@@ -179,7 +179,7 @@ function getLanguageFlag(langCode) {
     return flagMap[langCode] || '🌐';
 }
 
-export default function FilebrowserMain() {
+export default function FileBrowserMain() {
     const dispatch = useDispatch();
     const { socket } = useSocket();
     const { t } = useTranslation('filebrowser');

@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Preferences Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/settings/preferences');
+    await page.goto('/admin/system/preferences');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -31,7 +31,7 @@ test.describe('Preferences Settings', () => {
 
 test.describe('Location Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/settings/location');
+    await page.goto('/admin/system/location');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -47,7 +47,7 @@ test.describe('Location Settings', () => {
 
 test.describe('Maintenance Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/settings/maintenance');
+    await page.goto('/admin/system/maintenance');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -56,7 +56,7 @@ test.describe('Maintenance Settings', () => {
     await page.waitForTimeout(2000);
 
     // Page should be loaded (basic check)
-    expect(page.url()).toContain('/settings/maintenance');
+    expect(page.url()).toContain('/admin/system/maintenance');
   });
 
   test('should have maintenance controls or information', async ({ page }) => {
@@ -71,7 +71,7 @@ test.describe('Maintenance Settings', () => {
   });
 
   test('should display time drift diagnostics card', async ({ page }) => {
-    await page.goto('/settings/maintenance?mtab=diagnostics');
+    await page.goto('/admin/system/maintenance?mtab=diagnostics');
     await page.waitForLoadState('domcontentloaded');
     await expect(page.getByText(/Frontend vs Backend Time/i)).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(/Frontend Time/i)).toBeVisible({ timeout: 10000 });
@@ -81,7 +81,7 @@ test.describe('Maintenance Settings', () => {
 
 test.describe('About Page', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/settings/about');
+    await page.goto('/admin/system/about');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -90,7 +90,7 @@ test.describe('About Page', () => {
     await page.waitForTimeout(2000);
 
     // Should be on the about page
-    expect(page.url()).toContain('/settings/about');
+    expect(page.url()).toContain('/admin/system/about');
   });
 
   test('should display application information', async ({ page }) => {
@@ -105,30 +105,30 @@ test.describe('About Page', () => {
 test.describe('Settings Navigation Flow', () => {
   test('should navigate between different settings pages', async ({ page }) => {
     // Start at preferences
-    await page.goto('/settings/preferences');
+    await page.goto('/admin/system/preferences');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/settings/preferences');
+    expect(page.url()).toContain('/admin/system/preferences');
 
     // Navigate to location
-    await page.goto('/settings/location');
+    await page.goto('/admin/system/location');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/settings/location');
+    expect(page.url()).toContain('/admin/system/location');
 
     // Navigate to maintenance
-    await page.goto('/settings/maintenance');
+    await page.goto('/admin/system/maintenance');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/settings/maintenance');
+    expect(page.url()).toContain('/admin/system/maintenance');
 
     // Navigate to about
-    await page.goto('/settings/about');
+    await page.goto('/admin/system/about');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/settings/about');
+    expect(page.url()).toContain('/admin/system/about');
   });
 });
 
 test.describe('Preferences Persistence', () => {
   test('should persist theme preference after refresh', async ({ page }) => {
-    await page.goto('/settings/preferences');
+    await page.goto('/admin/system/preferences');
     await page.waitForLoadState('domcontentloaded');
 
     const themeSelect = page.locator('#theme-selector');

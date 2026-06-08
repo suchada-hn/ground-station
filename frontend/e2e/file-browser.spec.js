@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('File Browser', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/filebrowser');
+    await page.goto('/files');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -14,7 +14,7 @@ test.describe('File Browser', () => {
     await page.waitForTimeout(2000);
 
     // Verify we're on the file browser page
-    expect(page.url()).toContain('/filebrowser');
+    expect(page.url()).toContain('/files');
   });
 
   test('should have file browser interface elements', async ({ page }) => {
@@ -84,14 +84,14 @@ test.describe('File Browser', () => {
     await expect(content).toBeVisible();
 
     // Page should render something (either files or empty state)
-    expect(page.url()).toContain('/filebrowser');
+    expect(page.url()).toContain('/files');
   });
 });
 
 test.describe('File Browser Navigation', () => {
   test('should maintain state when navigating back to file browser', async ({ page }) => {
     // Visit file browser
-    await page.goto('/filebrowser');
+    await page.goto('/files');
     await page.waitForLoadState('networkidle');
 
     // Navigate away
@@ -99,17 +99,17 @@ test.describe('File Browser Navigation', () => {
     await page.waitForLoadState('networkidle');
 
     // Navigate back
-    await page.goto('/filebrowser');
+    await page.goto('/files');
     await page.waitForLoadState('networkidle');
 
     // Should still be on file browser
-    expect(page.url()).toContain('/filebrowser');
+    expect(page.url()).toContain('/files');
   });
 });
 
 test.describe('File Browser Interactions', () => {
   test('should support keyboard navigation', async ({ page }) => {
-    await page.goto('/filebrowser');
+    await page.goto('/files');
     await page.waitForTimeout(3000);
 
     // Try to focus on the file list
@@ -127,7 +127,7 @@ test.describe('File Browser Interactions', () => {
   });
 
   test('should handle folder navigation', async ({ page }) => {
-    await page.goto('/filebrowser');
+    await page.goto('/files');
     await page.waitForTimeout(3000);
 
     // Look for folder items or navigation breadcrumbs

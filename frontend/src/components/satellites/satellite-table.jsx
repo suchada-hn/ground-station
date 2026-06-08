@@ -188,7 +188,7 @@ const SatelliteTable = React.memo(function SatelliteTable() {
         if (!noradId) {
             return;
         }
-        navigate(`/satellite/${noradId}`);
+        navigate(`/satellites/${noradId}`);
     };
 
     const handleOpenTransmitters = (satellite) => {

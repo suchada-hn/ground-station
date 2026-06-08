@@ -21,26 +21,23 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './i18n/config.js'
-import {createBrowserRouter, RouterProvider} from "react-router";
+import {createBrowserRouter, Navigate, RouterProvider, useParams} from "react-router";
 import {
-    SettingsTabLocation,
-    SettingsTabRotator,
-    SettingsTabSettings,
-    SettingsTabPreferences,
-    SettingsTabIntegrations,
-    SettingsTabSatellites,
-    SettingsTabMaintenance,
-    SettingsTabRig,
-    SettingsTabOrbitalSources,
-    SettingsTabAbout,
-    SettingsTabSatelliteGroups,
-    SettingsTabCamera,
-    SettingsTabSDR
+    AdminSatellitesCatalogPage,
+    AdminSatellitesGroupsPage,
+    AdminSatellitesSourcesPage,
+    AdminSystemAboutPage,
+    AdminSystemGeneralPage,
+    AdminSystemHardwarePage,
+    AdminSystemIntegrationsPage,
+    AdminSystemLocationPage,
+    AdminSystemMaintenancePage,
+    AdminSystemPreferencesPage,
 } from "./components/settings/settings.jsx";
-import GlobalSatelliteTrackLayout from "./components/overview/main-layout.jsx";
+import OverviewLayout from "./components/overview/main-layout.jsx";
 import App from "./App.jsx";
 import Layout from "./components/dashboard/dashboard-layout.jsx";
-import TargetSatelliteLayout from "./components/target/main-layout.jsx";
+import TrackingLayout from "./components/target/main-layout.jsx";
 import {SocketProvider} from './components/common/socket.jsx';
 import { Provider as ReduxProvider} from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
@@ -50,11 +47,16 @@ import NotFoundPage from './components/common/not-found-page.jsx';
 import MainLayout from "./components/waterfall/main-layout.jsx";
 import {WakeLockProvider} from "./components/dashboard/wake-lock-provider.jsx";
 import SatelliteInfoPage from "./components/satellites/satellite-info-page.jsx";
-import FilebrowserMain from "./components/filebrowser/filebrowser-main.jsx";
+import FileBrowserMain from "./components/filebrowser/filebrowser-main.jsx";
 import ScheduledObservationsLayout from "./components/scheduler/main-layout.jsx";
 import CelestialRouteGuard from "./components/celestial/celestial-route-guard.jsx";
 
 const enableStrictMode = import.meta.env.VITE_REACT_STRICT_MODE !== 'false';
+
+function LegacySatellitePathRedirect() {
+    const { noradId } = useParams();
+    return <Navigate to={`/satellites/${noradId}`} replace />;
+}
 
 const router = createBrowserRouter([
     {
@@ -67,51 +69,196 @@ const router = createBrowserRouter([
                 errorElement: <ErrorPage />,
                 children: [
                     {
-                        path: "",
-                        Component: GlobalSatelliteTrackLayout,
+                        index: true,
+                        // Canonical landing page is /overview; keep / as a stable entry point.
+                        element: <Navigate to="/overview" replace />,
                     },
                     {
+                        path: "overview",
+                        Component: OverviewLayout,
+                    },
+                    {
+                        path: "tracking",
+                        Component: TrackingLayout,
+                    },
+                    {
+                        // Backward-compatible alias for older links/bookmarks.
                         path: "track",
-                        Component: TargetSatelliteLayout,
+                        element: <Navigate to="/tracking" replace />,
                     },
                     {
                         path: "waterfall",
                         Component: MainLayout,
                     },
                     {
+                        path: "files",
+                        Component: FileBrowserMain,
+                    },
+                    {
+                        // Backward-compatible alias for older links/bookmarks.
                         path: "filebrowser",
-                        Component: FilebrowserMain,
+                        element: <Navigate to="/files" replace />,
                     },
                     {
                         path: "scheduler",
                         Component: ScheduledObservationsLayout,
                     },
                     {
-                        path: "celestial",
+                        path: "solarsystem",
                         Component: CelestialRouteGuard,
                     },
                     {
-                        path: "satellite/:noradId",
+                        // Backward-compatible alias for older links/bookmarks.
+                        path: "celestial",
+                        element: <Navigate to="/solarsystem" replace />,
+                    },
+                    {
+                        path: "satellites/:noradId",
                         Component: SatelliteInfoPage,
+                    },
+                    {
+                        // Backward-compatible alias for older links/bookmarks.
+                        path: "satellite/:noradId",
+                        Component: LegacySatellitePathRedirect,
+                    },
+                    {
+                        path: "admin",
+                        children: [
+                            {
+                                index: true,
+                                element: <Navigate to="/admin/system/preferences" replace />,
+                            },
+                            {
+                                path: "hardware",
+                                children: [
+                                    {
+                                        index: true,
+                                        element: <Navigate to="/admin/system/hardware/rigs" replace />,
+                                    },
+                                    {
+                                        path: "rigs",
+                                        element: <Navigate to="/admin/system/hardware/rigs" replace />,
+                                    },
+                                    {
+                                        path: "rotators",
+                                        element: <Navigate to="/admin/system/hardware/rotators" replace />,
+                                    },
+                                    {
+                                        path: "sdrs",
+                                        element: <Navigate to="/admin/system/hardware/sdrs" replace />,
+                                    },
+                                ],
+                            },
+                            {
+                                path: "satellites",
+                                children: [
+                                    {
+                                        index: true,
+                                        element: <Navigate to="/admin/satellites/catalog" replace />,
+                                    },
+                                    {
+                                        path: "sources",
+                                        Component: AdminSatellitesSourcesPage,
+                                    },
+                                    {
+                                        path: "catalog",
+                                        Component: AdminSatellitesCatalogPage,
+                                    },
+                                    {
+                                        path: "groups",
+                                        Component: AdminSatellitesGroupsPage,
+                                    },
+                                ],
+                            },
+                            {
+                                path: "system",
+                                children: [
+                                    {
+                                        index: true,
+                                        element: <Navigate to="/admin/system/preferences" replace />,
+                                    },
+                                    {
+                                        path: "general",
+                                        Component: AdminSystemGeneralPage,
+                                    },
+                                    {
+                                        path: "preferences",
+                                        Component: AdminSystemPreferencesPage,
+                                    },
+                                    {
+                                        path: "integrations",
+                                        Component: AdminSystemIntegrationsPage,
+                                    },
+                                    {
+                                        path: "location",
+                                        Component: AdminSystemLocationPage,
+                                    },
+                                    {
+                                        path: "hardware",
+                                        children: [
+                                            {
+                                                index: true,
+                                                element: <Navigate to="/admin/system/hardware/rigs" replace />,
+                                            },
+                                            {
+                                                path: "rigs",
+                                                Component: AdminSystemHardwarePage,
+                                            },
+                                            {
+                                                path: "rotators",
+                                                Component: AdminSystemHardwarePage,
+                                            },
+                                            {
+                                                path: "sdrs",
+                                                Component: AdminSystemHardwarePage,
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        path: "maintenance",
+                                        Component: AdminSystemMaintenancePage,
+                                    },
+                                    {
+                                        path: "about",
+                                        Component: AdminSystemAboutPage,
+                                    },
+                                ],
+                            },
+                        ],
                     },
                     {
                         path: "satellites",
                         children: [
                             {
+                                index: true,
+                                element: <Navigate to="/admin/satellites/catalog" replace />,
+                            },
+                            {
+                                path: "sources",
+                                element: <Navigate to="/admin/satellites/sources" replace />,
+                            },
+                            {
+                                // Backward-compatible aliases for older links/bookmarks.
                                 path: "orbital-sources",
-                                Component: SettingsTabOrbitalSources,
+                                element: <Navigate to="/admin/satellites/sources" replace />,
                             },
                             {
+                                // Backward-compatible aliases for older links/bookmarks.
                                 path: "tlesources",
-                                Component: SettingsTabOrbitalSources,
+                                element: <Navigate to="/admin/satellites/sources" replace />,
                             },
                             {
+                                path: "catalog",
+                                element: <Navigate to="/admin/satellites/catalog" replace />,
+                            },
+                            {
+                                // Backward-compatible alias for older links/bookmarks.
                                 path: "satellites",
-                                Component: SettingsTabSatellites,
+                                element: <Navigate to="/admin/satellites/catalog" replace />,
                             },
                             {
                                 path: "groups",
-                                Component: SettingsTabSatelliteGroups,
+                                element: <Navigate to="/admin/satellites/groups" replace />,
                             },
                         ],
                     },
@@ -119,25 +266,34 @@ const router = createBrowserRouter([
                         path: "settings",
                         children: [
                             {
-                                path: "backend",
-                                Component: SettingsTabSettings,
+                                index: true,
+                                element: <Navigate to="/admin/system/preferences" replace />,
                             },
                             {
-                                // Backward-compatible alias for existing deep links/bookmarks.
+                                path: "general",
+                                element: <Navigate to="/admin/system/general" replace />,
+                            },
+                            {
+                                // Backward-compatible alias for older links/bookmarks.
+                                path: "backend",
+                                element: <Navigate to="/admin/system/general" replace />,
+                            },
+                            {
+                                // Backward-compatible alias for older links/bookmarks.
                                 path: "settings",
-                                Component: SettingsTabSettings,
+                                element: <Navigate to="/admin/system/general" replace />,
                             },
                             {
                                 path: "preferences",
-                                Component: SettingsTabPreferences,
+                                element: <Navigate to="/admin/system/preferences" replace />,
                             },
                             {
                                 path: "integrations",
-                                Component: SettingsTabIntegrations,
+                                element: <Navigate to="/admin/system/integrations" replace />,
                             },
                             {
                                 path: "location",
-                                Component: SettingsTabLocation,
+                                element: <Navigate to="/admin/system/location" replace />,
                             },
                             // {
                             //     path: "users",
@@ -145,11 +301,11 @@ const router = createBrowserRouter([
                             // },
                             {
                                 path: "maintenance",
-                                Component: SettingsTabMaintenance,
+                                element: <Navigate to="/admin/system/maintenance" replace />,
                             },
                             {
                                 path: "about",
-                                Component: SettingsTabAbout,
+                                element: <Navigate to="/admin/system/about" replace />,
                             },
                         ],
                     },
@@ -157,20 +313,30 @@ const router = createBrowserRouter([
                         path: "hardware",
                         children: [
                             {
+                                index: true,
+                                element: <Navigate to="/admin/system/hardware/rigs" replace />,
+                            },
+                            {
+                                path: "rigs",
+                                element: <Navigate to="/admin/system/hardware/rigs" replace />,
+                            },
+                            {
+                                // Backward-compatible alias for older links/bookmarks.
                                 path: "rig",
-                                Component: SettingsTabRig,
+                                element: <Navigate to="/admin/system/hardware/rigs" replace />,
                             },
                             {
+                                path: "rotators",
+                                element: <Navigate to="/admin/system/hardware/rotators" replace />,
+                            },
+                            {
+                                // Backward-compatible alias for older links/bookmarks.
                                 path: "rotator",
-                                Component: SettingsTabRotator,
-                            },
-                            {
-                                path: "cameras",
-                                Component: SettingsTabCamera,
+                                element: <Navigate to="/admin/system/hardware/rotators" replace />,
                             },
                             {
                                 path: "sdrs",
-                                Component: SettingsTabSDR,
+                                element: <Navigate to="/admin/system/hardware/sdrs" replace />,
                             },
                         ],
                     },

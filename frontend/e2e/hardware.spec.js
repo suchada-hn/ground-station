@@ -55,7 +55,7 @@ test.describe('Rig Configuration', () => {
   };
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/hardware/rig');
+    await page.goto('/admin/system/hardware/rigs');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -64,7 +64,7 @@ test.describe('Rig Configuration', () => {
     await page.waitForTimeout(2000);
 
     // Verify we're on the rigs page
-    expect(page.url()).toContain('/hardware/rig');
+    expect(page.url()).toContain('/admin/system/hardware/rigs');
   });
 
   test('should have rig configuration controls', async ({ page }) => {
@@ -172,7 +172,7 @@ test.describe('Rotator Configuration', () => {
   };
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/hardware/rotator');
+    await page.goto('/admin/system/hardware/rotators');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -180,7 +180,7 @@ test.describe('Rotator Configuration', () => {
     await page.waitForTimeout(2000);
 
     // Verify we're on the rotator page
-    expect(page.url()).toContain('/hardware/rotator');
+    expect(page.url()).toContain('/admin/system/hardware/rotators');
   });
 
   test('should have rotator configuration controls', async ({ page }) => {
@@ -314,7 +314,7 @@ test.describe('SDR Configuration', () => {
   };
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/hardware/sdrs');
+    await page.goto('/admin/system/hardware/sdrs');
     await page.waitForLoadState('domcontentloaded');
   });
 
@@ -322,7 +322,7 @@ test.describe('SDR Configuration', () => {
     await page.waitForTimeout(2000);
 
     // Verify we're on the SDRs page
-    expect(page.url()).toContain('/hardware/sdrs');
+    expect(page.url()).toContain('/admin/system/hardware/sdrs');
   });
 
   test('should have SDR configuration controls', async ({ page }) => {
@@ -446,18 +446,18 @@ test.describe('SDR Configuration', () => {
 test.describe('Hardware Navigation Flow', () => {
   test('should navigate between hardware pages', async ({ page }) => {
     // Navigate to rigs
-    await page.goto('/hardware/rig');
+    await page.goto('/admin/system/hardware/rigs');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/hardware/rig');
+    expect(page.url()).toContain('/admin/system/hardware/rigs');
 
     // Navigate to rotators
-    await page.goto('/hardware/rotator');
+    await page.goto('/admin/system/hardware/rotators');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/hardware/rotator');
+    expect(page.url()).toContain('/admin/system/hardware/rotators');
 
     // Navigate to SDRs
-    await page.goto('/hardware/sdrs');
+    await page.goto('/admin/system/hardware/sdrs');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/hardware/sdrs');
+    expect(page.url()).toContain('/admin/system/hardware/sdrs');
   });
 });

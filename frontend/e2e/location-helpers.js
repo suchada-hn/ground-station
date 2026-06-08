@@ -77,7 +77,7 @@ export const completeLocationWizardIfVisible = async (page, { waitForMs = 5000 }
 };
 
 export const ensureLocationIsConfigured = async (page, { baseURL } = {}) => {
-  const locationUrl = toPathUrl(baseURL, '/settings/location');
+  const locationUrl = toPathUrl(baseURL, '/admin/system/location');
 
   await page.goto(locationUrl);
   await page.waitForLoadState('domcontentloaded');

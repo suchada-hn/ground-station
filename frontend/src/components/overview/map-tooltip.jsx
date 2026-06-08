@@ -88,7 +88,7 @@ const SatelliteMarker = ({
 
     const handleNavigateToSatellite = (e) => {
         e.stopPropagation();
-        navigate(`/satellite/${satellite.norad_id}`);
+        navigate(`/satellites/${satellite.norad_id}`);
     };
 
     return (

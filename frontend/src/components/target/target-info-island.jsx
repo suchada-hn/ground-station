@@ -1184,7 +1184,7 @@ const TargetInfoIsland = () => {
                             variant="text"
                             size="small"
                             startIcon={<InfoOutlinedIcon sx={{ fontSize: 14 }} />}
-                            onClick={() => navigate(`/satellite/${satelliteData['details']['norad_id']}`)}
+                            onClick={() => navigate(`/satellites/${satelliteData['details']['norad_id']}`)}
                             sx={{
                                 flex: 1,
                                 minWidth: 0,

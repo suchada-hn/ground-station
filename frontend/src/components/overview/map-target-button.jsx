@@ -21,7 +21,7 @@ const SatelliteTrackSuggestion = ({
     }
 
     const handleNavigateToSatellite = () => {
-        navigate(`/satellite/${selectedSatelliteId}`);
+        navigate(`/satellites/${selectedSatelliteId}`);
     };
 
     return (

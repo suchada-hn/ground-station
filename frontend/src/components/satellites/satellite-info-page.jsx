@@ -268,7 +268,7 @@ const SatelliteInfoContent = ({
                                     noradId: satelliteData.norad_id
                                 })).unwrap();
                                 if (!asDialog) {
-                                    navigate('/satellites/satellites');
+                                    navigate('/admin/satellites/catalog');
                                 } else if (onClose) {
                                     onClose();
                                 }
@@ -616,7 +616,7 @@ const SatelliteInfoPage = () => {
                 </Typography>
                 <Button
                     variant="contained"
-                    onClick={() => navigate('/satellites/satellites')}
+                    onClick={() => navigate('/admin/satellites/catalog')}
                     sx={{ mt: 2 }}
                 >
                     {t('satellite_info.go_to_list')}

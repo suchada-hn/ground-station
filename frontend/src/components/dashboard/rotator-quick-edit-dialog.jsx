@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useDispatch } from "react-redux";
 import { useSocket } from "../common/socket.jsx";
-import { submitOrEditRotator } from "../hardware/rotaror-slice.jsx";
+import { submitOrEditRotator } from "../hardware/rotator-slice.jsx";
 import { toast } from "../../utils/toast-with-timestamp.jsx";
 import { useTranslation } from "react-i18next";
 import RotatorEditDialog from "../hardware/rotator-edit-dialog.jsx";

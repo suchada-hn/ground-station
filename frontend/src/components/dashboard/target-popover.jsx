@@ -426,7 +426,7 @@ const SatelliteInfoPopover = () => {
 
     const handleNavigateToSatelliteInfo = () => {
         if (satelliteData.details.norad_id) {
-            navigate(`/satellite/${satelliteData.details.norad_id}`);
+            navigate(`/satellites/${satelliteData.details.norad_id}`);
             handleClose(); // Close the popover after navigation
         }
     };

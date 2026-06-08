@@ -23,7 +23,7 @@ import {combineReducers, configureStore} from '@reduxjs/toolkit';
 import { persistStore, persistReducer } from "redux-persist";
 import storageEngine from "redux-persist/lib/storage";
 import rigsReducer from '../hardware/rig-slice.jsx';
-import rotatorsReducer from '../hardware/rotaror-slice.jsx';
+import rotatorsReducer from '../hardware/rotator-slice.jsx';
 import orbitalSourcesReducer from '../satellites/sources-slice.jsx';
 import satellitesReducer from '../satellites/satellite-slice.jsx';
 import satelliteGroupReducer from '../satellites/groups-slice.jsx';
@@ -34,7 +34,6 @@ import targetSatTrackReducer from '../target/target-slice.jsx'
 import trackerInstancesReducer from '../target/tracker-instances-slice.jsx';
 import overviewSatTrackReducer from '../overview/overview-slice.jsx';
 import dashboardReducer from '../dashboard/dashboard-slice.jsx';
-import cameraReducer from '../hardware/camera-slice.jsx';
 import waterfallReducer from '../waterfall/waterfall-slice.jsx';
 import gnssReducer from '../waterfall/gnss-slice.jsx';
 import vfoReducer from '../waterfall/vfo-marker/vfo-slice.jsx';
@@ -186,13 +185,6 @@ const dashboardPersistConfig = {
 };
 
 
-// Persist configuration for camera slice
-const cameraPersistConfig = {
-    key: 'camera',
-    storage,
-    whitelist: ['selectedCameraId', 'selectedCamera']
-};
-
 // Persist configuration for SDR slice
 const sdrPersistConfig = {
     key: 'sdr',
@@ -308,7 +300,6 @@ const persistedPreferencesReducer = persistReducer(preferencesPersistConfig, pre
 const persistedTargetSatTrackReducer = persistReducer(targetSatTrackPersistConfig, targetSatTrackReducer);
 const persistedOverviewSatTrackReducer = persistReducer(overviewSatTrackPersistConfig, overviewSatTrackReducer);
 const persistedDashboardReducer = persistReducer(dashboardPersistConfig, dashboardReducer);
-const persistedCameraReducer = persistReducer(cameraPersistConfig, cameraReducer);
 const persistedSdrReducer = persistReducer(sdrPersistConfig, sdrsReducer);
 const persistedVersionInfoReducer = persistReducer(versionInfoConfig, versionReducer);
 const persistedUpdateCheckReducer = persistReducer(updateCheckConfig, updateCheckReducer);
@@ -342,7 +333,6 @@ export const store = configureStore({
         trackerInstances: trackerInstancesReducer,
         overviewSatTrack: persistedOverviewSatTrackReducer,
         dashboard: persistedDashboardReducer,
-        cameras: persistedCameraReducer,
         sdrs: persistedSdrReducer,
         version: persistedVersionInfoReducer,
         updateCheck: persistedUpdateCheckReducer,
