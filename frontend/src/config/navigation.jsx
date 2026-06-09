@@ -253,11 +253,6 @@ export const getNavigation = ({ showCelestial = false } = {}) => {
             kind: 'header',
             title: i18n.t('operations', { ns: 'navigation', defaultValue: 'Operations' }),
         },
-        {
-            segment: 'earthview',
-            title: i18n.t('earthview', { ns: 'navigation', defaultValue: 'Earth view' }),
-            icon: <PublicIcon/>,
-        },
         ...(showCelestial
             ? [{
                 segment: 'solarsystem',
@@ -265,6 +260,11 @@ export const getNavigation = ({ showCelestial = false } = {}) => {
                 icon: <CelestialSolarIcon />,
             }]
             : []),
+        {
+            segment: 'earthview',
+            title: i18n.t('earthview', { ns: 'navigation', defaultValue: 'Earth view' }),
+            icon: <PublicIcon/>,
+        },
         {
             segment: 'tracking',
             title: i18n.t('live_tracking', { ns: 'navigation', defaultValue: 'Live Tracking' }),
