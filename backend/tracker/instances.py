@@ -37,9 +37,15 @@ def _extract_tracker_id_from_state_name(name: str) -> str:
     return tracker_id
 
 
+def _is_observation_tracker_id(tracker_id: str) -> bool:
+    return tracker_id.startswith("obs-")
+
+
 async def restore_tracker_instances_from_db() -> list[str]:
-    """Restore tracker runtimes/assignments from persisted tracker-scoped tracking_state rows."""
+    """Restore persistent tracker runtimes/assignments from tracker-scoped state rows."""
     restored_tracker_ids: list[str] = []
+    skipped_observation_tracker_ids: list[str] = []
+    restore_candidates: list[tuple[str, dict | None]] = []
     prefix = f"{TRACKING_STATE_NAME_PREFIX}:%"
 
     async with AsyncSessionLocal() as dbsession:
@@ -47,14 +53,29 @@ async def restore_tracker_instances_from_db() -> list[str]:
         result = await dbsession.execute(stmt)
         rows = result.scalars().all()
 
-    for row in rows:
-        tracker_id = _extract_tracker_id_from_state_name(getattr(row, "name", ""))
-        if not tracker_id:
-            continue
+        for row in rows:
+            tracker_id = _extract_tracker_id_from_state_name(getattr(row, "name", ""))
+            if not tracker_id:
+                continue
 
+            if _is_observation_tracker_id(tracker_id):
+                # Observation tracker slots are pass-scoped. If one is still persisted
+                # during process startup, the observation executor no longer owns the
+                # runtime context needed to stop it, so restoring it would create a
+                # stale extra tracker process.
+                await dbsession.delete(row)
+                skipped_observation_tracker_ids.append(tracker_id)
+                continue
+
+            value = getattr(row, "value", {}) or {}
+            restore_candidates.append((tracker_id, value if isinstance(value, dict) else None))
+
+        if skipped_observation_tracker_ids:
+            await dbsession.commit()
+
+    for tracker_id, value in restore_candidates:
         manager = get_tracker_manager(tracker_id)
-        value = getattr(row, "value", {}) or {}
-        if isinstance(value, dict):
+        if value is not None:
             assign_rotator_to_tracker(tracker_id, value.get("rotator_id"))
 
         await manager.sync_tracking_state_from_db()
@@ -68,6 +89,13 @@ async def restore_tracker_instances_from_db() -> list[str]:
         )
     else:
         logger.info("No persisted tracker instances found to restore")
+
+    if skipped_observation_tracker_ids:
+        logger.info(
+            "Removed %d stale observation tracker state row(s): %s",
+            len(skipped_observation_tracker_ids),
+            ", ".join(sorted(skipped_observation_tracker_ids)),
+        )
 
     return restored_tracker_ids
 
