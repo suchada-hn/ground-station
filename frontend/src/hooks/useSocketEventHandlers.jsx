@@ -701,6 +701,12 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
 
         // Decoder data events (SSTV, AFSK, Morse, GMSK, Transcription, etc.)
         socket.on('decoder-data', (data) => {
+            // Some backends/bridges can emit an empty decoder payload transiently.
+            // Guarding here avoids crashing the app shell on malformed events.
+            if (!data || typeof data !== 'object' || typeof data.type !== 'string') {
+                return;
+            }
+
             switch (data.type) {
                 case 'decoder-status':
                     // GNSS decoder restart: clear GNSS table/fix timeline so UI reflects a fresh session.
