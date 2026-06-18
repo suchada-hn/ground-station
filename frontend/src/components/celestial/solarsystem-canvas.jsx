@@ -1585,14 +1585,41 @@ const SolarSystemCanvas = ({
                 const isSelected = hasTrackedSelection && selectedTargetKeySet.has(targetKey);
                 const isDimmed = hasTrackedSelection && !isSelected;
                 const trackedHexColor = resolveTrackedColor(body, body.stale ? '#EF476F' : '#06D6A0');
+                const targetSlotNumber = Number(targetNumberByTargetKey?.[targetKey]);
+                const hasTargetSlotNumber = Number.isFinite(targetSlotNumber) && targetSlotNumber > 0;
+                const targetSlotLabel = hasTargetSlotNumber ? `T${Math.round(targetSlotNumber)}` : '';
 
                 ctx.fillStyle = isDimmed ? hexToRgba(trackedHexColor, 0.28) : trackedHexColor;
-                const markerSize = isSelected ? 8 : 6;
+                let markerSize = isSelected ? 8 : 6;
+                const targetLabelMeasureFontSize = isSelected ? 9 : 8;
+                const targetLabelRenderFontSize = targetLabelMeasureFontSize + 1;
+                if (hasTargetSlotNumber) {
+                    ctx.save();
+                    ctx.font = `700 ${targetLabelMeasureFontSize}px monospace`;
+                    const textWidth = Math.ceil(Math.max(6, ctx.measureText(targetSlotLabel).width));
+                    ctx.restore();
+                    markerSize = Math.max(markerSize, textWidth + 6, isSelected ? 17 : 15);
+                }
                 ctx.fillRect(sx - markerSize / 2, sy - markerSize / 2, markerSize, markerSize);
                 if (isSelected) {
                     ctx.strokeStyle = hexToRgba('#ffffff', theme.palette.mode === 'dark' ? 0.9 : 0.75);
                     ctx.lineWidth = 1.25;
                     ctx.strokeRect(sx - markerSize / 2 - 1, sy - markerSize / 2 - 1, markerSize + 2, markerSize + 2);
+                }
+                if (hasTargetSlotNumber) {
+                    ctx.save();
+                    ctx.font = `700 ${targetLabelRenderFontSize}px monospace`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.lineJoin = 'round';
+                    ctx.lineWidth = isSelected ? 2.4 : 2;
+                    ctx.strokeStyle = hexToRgba('#000000', isDimmed ? 0.92 : 0.98);
+                    ctx.shadowColor = hexToRgba('#000000', isDimmed ? 0.3 : 0.38);
+                    ctx.shadowBlur = 0.7;
+                    ctx.strokeText(targetSlotLabel, sx, sy + 0.35);
+                    ctx.fillStyle = hexToRgba(theme.palette.common.white, isDimmed ? 0.95 : 1);
+                    ctx.fillText(targetSlotLabel, sx, sy + 0.35);
+                    ctx.restore();
                 }
 
                 if (effectiveDisplayOptions.showTrackedLabels) {
@@ -1605,17 +1632,18 @@ const SolarSystemCanvas = ({
                     const labelAnchorX = (isSingleTrackedMode && isSunLabelTarget(body))
                         ? sx + SUN_LABEL_SINGLE_MODE_OFFSET_PX
                         : sx;
-                    const targetSlotNumber = Number(targetNumberByTargetKey?.[targetKey]);
-                    const targetSlotLabel = Number.isFinite(targetSlotNumber) && targetSlotNumber > 0
-                        ? `T${targetSlotNumber} `
-                        : '';
-                    const bodyLabel = `${targetSlotLabel}${body.name || body.command || 'object'}`;
+                    const labelOffsetX = hasTargetSlotNumber
+                        ? Math.max(8, Math.ceil(markerSize / 2) + 4)
+                        : undefined;
+                    const labelOptions = labelOffsetX != null
+                        ? { offsetX: labelOffsetX, offsetY: isSelected ? -4 : -6 }
+                        : (isSelected ? { offsetX: 8, offsetY: -4 } : undefined);
                     drawLabelWithAutoOffset(
-                        bodyLabel,
+                        body.name || body.command || 'object',
                         labelAnchorX,
                         sy,
                         labelColor,
-                        isSelected ? { offsetX: 8, offsetY: -4 } : undefined,
+                        labelOptions,
                     );
                 }
             });
