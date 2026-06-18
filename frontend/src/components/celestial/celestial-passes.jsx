@@ -432,10 +432,20 @@ const CelestialPasses = ({
             cellClassName: 'passes-cell-status',
             sortComparator: (v1, v2) => getStatusPriority(v1) - getStatusPriority(v2),
             renderCell: (params) => (
-                <PassStatusCell
-                    status={params.value}
-                    targetNumber={targetNumberByTargetKey?.[String(params.row?.targetKey || '').trim()] ?? null}
-                />
+                <Box
+                    sx={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                    }}
+                >
+                    <PassStatusCell
+                        status={params.value}
+                        targetNumber={targetNumberByTargetKey?.[String(params.row?.targetKey || '').trim()] ?? null}
+                    />
+                </Box>
             ),
         },
         {
