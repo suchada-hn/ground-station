@@ -64,6 +64,7 @@ import {
     fetchLocalSoapySDRDevices,
     startSoapySDRDiscovery,
     fetchLocalRtlSdrDevices,
+    fetchLocalUhdDevices,
 } from './sdr-slice.jsx';
 import Paper from "@mui/material/Paper";
 import MemoryIcon from '@mui/icons-material/Memory';
@@ -284,11 +285,13 @@ export default function SDRsPage() {
     const [selected, setSelected] = useState([]);
     const [pageSize, setPageSize] = useState(10);
     const [selectedRtlDevice, setSelectedRtlDevice] = useState('');
+    const [selectedUhdDevice, setSelectedUhdDevice] = useState('');
     const [deleteConfirmText, setDeleteConfirmText] = useState('');
     const [discovering, setDiscovering] = useState(false);
     const [stickyAntennaPorts, setStickyAntennaPorts] = useState({ rx: [], tx: [] });
     const hasInitialized = useRef(false);
     const rtlProbeRequested = useRef(false);
+    const uhdProbeRequested = useRef(false);
     const { t } = useTranslation('hardware');
 
     const {
@@ -305,12 +308,15 @@ export default function SDRsPage() {
         loadingLocalSDRs,
         localRtlDevices,
         loadingLocalRtlSDRs,
+        localUhdDevices,
+        loadingLocalUhdSDRs,
     } = useSelector((state) => state.sdrs);
     const { tasks: backgroundTasks = {} } = useSelector((state) => state.backgroundTasks);
     const rowSelectionModel = useMemo(() => toRowSelectionModel(selected), [selected]);
     const isEditing = Boolean(formValues.id);
     const isLocalSoapyProbeLoading = formValues.type === 'soapysdrlocal' && loadingLocalSDRs;
-    const isDialogFormInputsDisabled = loading || loadingLocalRtlSDRs || isLocalSoapyProbeLoading;
+    const isDialogFormInputsDisabled =
+        loading || loadingLocalRtlSDRs || loadingLocalUhdSDRs || isLocalSoapyProbeLoading;
     const isSoapyServerDiscoveryRunning = useMemo(
         () =>
             Object.values(backgroundTasks).some(
@@ -382,8 +388,10 @@ export default function SDRsPage() {
     useEffect(() => {
         if (openAddDialog) {
             setSelectedRtlDevice('');
+            setSelectedUhdDevice('');
         } else {
             rtlProbeRequested.current = false;
+            uhdProbeRequested.current = false;
             setStickyAntennaPorts({ rx: [], tx: [] });
         }
     }, [openAddDialog]);
@@ -392,7 +400,15 @@ export default function SDRsPage() {
         if (!openAddDialog) return;
         // Reset row visibility cache when the selected device context changes.
         setStickyAntennaPorts({ rx: [], tx: [] });
-    }, [openAddDialog, formValues.id, formValues.type, formValues.host, selectedRtlDevice, selectedSdrDevice]);
+    }, [
+        openAddDialog,
+        formValues.id,
+        formValues.type,
+        formValues.host,
+        selectedRtlDevice,
+        selectedUhdDevice,
+        selectedSdrDevice
+    ]);
 
     useEffect(() => {
         const isRtlUsb = rtlUsbTypes.has(formValues.type);
@@ -401,6 +417,14 @@ export default function SDRsPage() {
             dispatch(fetchLocalRtlSdrDevices({ socket }));
         }
     }, [dispatch, formValues.type, loadingLocalRtlSDRs, openAddDialog, socket]);
+
+    useEffect(() => {
+        const isUhd = formValues.type === 'uhd';
+        if (openAddDialog && isUhd && !loadingLocalUhdSDRs && !uhdProbeRequested.current) {
+            uhdProbeRequested.current = true;
+            dispatch(fetchLocalUhdDevices({ socket }));
+        }
+    }, [dispatch, formValues.type, loadingLocalUhdSDRs, openAddDialog, socket]);
 
     const handleStartSoapyDiscovery = async () => {
         if (!socket) return;
@@ -506,6 +530,11 @@ export default function SDRsPage() {
             return normalizeAntennaInfo(getSelectedRemoteSdr()?.antennas);
         }
 
+        if (formValues.type === 'uhd') {
+            if (selectedUhdDevice === '') return { rx: [], tx: [] };
+            return normalizeAntennaInfo(localUhdDevices?.[Number(selectedUhdDevice)]?.antennas);
+        }
+
         return { rx: [], tx: [] };
     };
 
@@ -566,8 +595,10 @@ export default function SDRsPage() {
         formValues.type,
         formValues.host,
         localRtlDevices,
+        localUhdDevices,
         localSoapyDevices,
         selectedRtlDevice,
+        selectedUhdDevice,
         selectedSdrDevice,
         soapyServers,
         stickyAntennaPorts.rx,
@@ -635,6 +666,8 @@ export default function SDRsPage() {
             // Probe local Soapy devices only when the user explicitly selects the local Soapy type.
             if (newType === 'soapysdrlocal') {
                 dispatch(fetchLocalSoapySDRDevices({ socket }));
+            } else if (newType === 'uhd') {
+                dispatch(fetchLocalUhdDevices({ socket }));
             }
         } else {
             // Normal field update
@@ -771,6 +804,8 @@ export default function SDRsPage() {
                                 handleChange({target: {name: "type", value: nextValue}});
                             }
                             dispatch(setSelectedSdrDevice('')); // Reset selected SDR when type changes
+                            setSelectedRtlDevice('');
+                            setSelectedUhdDevice('');
                         }}
                     >
                         <MenuItem value="" disabled>{t('sdr.select_sdr_type', 'Select SDR type')}</MenuItem>
@@ -994,6 +1029,122 @@ export default function SDRsPage() {
                         fields.push(
                             <Alert key="no-local-devices" severity="info" sx={{ mt: 1 }}>
                                 {t('sdr.no_soapy_devices')}
+                            </Alert>
+                        );
+                    }
+                }
+            }
+
+            if (selectedType === 'uhd' && !isEditing) {
+                if (loadingLocalUhdSDRs) {
+                    fields.push(
+                        <Alert
+                            key="loading-uhd-devices"
+                            severity="info"
+                            sx={{
+                                mt: 1,
+                                display: 'flex',
+                                alignItems: 'center',
+                                '& .MuiAlert-message': {
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 1
+                                }
+                            }}
+                        >
+                            <Box
+                                sx={{
+                                    display: 'inline-block',
+                                    width: '16px',
+                                    height: '16px',
+                                    border: '2px solid #e3f2fd',
+                                    borderTop: '2px solid #1976d2',
+                                    borderRadius: '50%',
+                                    animation: 'spin 1s linear infinite',
+                                    '@keyframes spin': {
+                                        '0%': { transform: 'rotate(0deg)' },
+                                        '100%': { transform: 'rotate(360deg)' }
+                                    }
+                                }}
+                            />
+                            <Typography variant="body2" component="span">
+                                {t('sdr.probing_uhd', 'Probing for local UHD/USRP devices...')}
+                            </Typography>
+                        </Alert>
+                    );
+                } else {
+                    fields.push(
+                        <Box
+                            key="local-uhd-controls-row"
+                            sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
+                        >
+                            <FormControl fullWidth size="small">
+                                <InputLabel id="local-uhd-device-label">
+                                    {t('sdr.select_uhd_device', 'UHD/USRP Device')}
+                                </InputLabel>
+                                <Select
+                                    labelId="local-uhd-device-label"
+                                    label={t('sdr.select_uhd_device', 'UHD/USRP Device')}
+                                    size="small"
+                                    value={selectedUhdDevice}
+                                    disabled={!localUhdDevices || localUhdDevices.length === 0}
+                                    onChange={(e) => {
+                                        const selectedUhdIndex = e.target.value;
+                                        setSelectedUhdDevice(selectedUhdIndex);
+
+                                        if (selectedUhdIndex !== '') {
+                                            const selectedDevice = localUhdDevices[selectedUhdIndex];
+
+                                            if (selectedDevice) {
+                                                const rxRange = selectedDevice?.frequency_ranges?.rx || {};
+                                                const parsedMin = Number(rxRange?.min);
+                                                const parsedMax = Number(rxRange?.max);
+
+                                                // Keep device-probed metadata in sync with add-dialog form defaults.
+                                                const newValues = {
+                                                    ...formValues,
+                                                    name: selectedDevice.label || 'UHD Device',
+                                                    serial: selectedDevice.serial || '',
+                                                    frequency_min: Number.isFinite(parsedMin) ? parsedMin : formValues.frequency_min,
+                                                    frequency_max: Number.isFinite(parsedMax) ? parsedMax : formValues.frequency_max,
+                                                };
+
+                                                dispatch(setFormValues(newValues));
+                                            }
+                                        }
+                                    }}
+                                >
+                                    <MenuItem value="" disabled>{t('sdr.select_sdr')}</MenuItem>
+                                    {(localUhdDevices || []).map((device, index) => (
+                                        <MenuItem key={index} value={index}>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                <MemoryIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                                                <Box component="span">
+                                                    {device.label || `UHD Device ${index}`}
+                                                    {device.serial ? ` :: ${device.serial}` : ''}
+                                                </Box>
+                                            </Box>
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                            <Tooltip title={t('sdr.refresh_uhd_devices', 'Refresh UHD/USRP devices')}>
+                                <IconButton
+                                    size="small"
+                                    color="primary"
+                                    aria-label={t('sdr.refresh_uhd_devices', 'Refresh UHD/USRP devices')}
+                                    onClick={() => dispatch(fetchLocalUhdDevices({ socket }))}
+                                >
+                                    <RefreshIcon fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+                        </Box>
+                    );
+
+                    if (!localUhdDevices || localUhdDevices.length === 0) {
+                        fields.push(
+                            <Alert key="no-uhd-devices" severity="info" sx={{ mt: 1 }}>
+                                {t('sdr.no_uhd_devices', 'No local UHD/USRP devices detected. Please connect a device and refresh.')}
                             </Alert>
                         );
                     }
@@ -1286,6 +1437,7 @@ export default function SDRsPage() {
             const hasProbeAntennaPorts = antennaPorts.rx.length > 0 || antennaPorts.tx.length > 0;
             const hasSelectedProbedDevice =
                 (rtlUsbTypes.has(selectedType) && selectedRtlDevice !== '') ||
+                (selectedType === 'uhd' && selectedUhdDevice !== '') ||
                 ((selectedType === 'soapysdrlocal' || selectedType === 'soapysdrremote') &&
                     selectedSdrDevice !== '');
             if (hasSelectedProbedDevice && !hasProbeAntennaPorts) {

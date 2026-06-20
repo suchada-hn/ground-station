@@ -334,6 +334,79 @@ async def get_local_rtl_sdr_devices():
     return reply
 
 
+async def get_local_uhd_devices():
+    """Retrieve a list of local UHD/USRP devices"""
+
+    reply: Dict[str, Union[bool, dict, list, str, None]] = {
+        "success": None,
+        "data": None,
+        "error": None,
+    }
+
+    try:
+        logger.info("Probing local UHD/USRP devices...")
+        probe_name = "local-uhd-probe"
+        probe_process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "from hardware.uhdenum import probe_available_uhd_devices;"
+            "import json; print(probe_available_uhd_devices())",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(probe_process.communicate(), timeout=35)
+            stdout_text = _decode_subprocess_output(stdout)
+            stderr_text = _decode_subprocess_output(stderr)
+
+            if probe_process.returncode not in (0, None):
+                logger.error(
+                    "%s exited with return code %s",
+                    probe_name,
+                    probe_process.returncode,
+                )
+            _log_probe_stderr(probe_name, stderr_text)
+
+            if not stdout_text:
+                raise Exception("UHD probe returned empty output")
+
+            try:
+                result = json.loads(stdout_text)
+            except json.JSONDecodeError as exc:
+                logger.error("%s produced invalid JSON: %s", probe_name, str(exc))
+                logger.error("%s stdout | %s", probe_name, _truncate_log_payload(stdout_text))
+                raise
+
+            _emit_probe_logs(probe_name, result.get("log"))
+
+            if result.get("success"):
+                result = result.get("data", [])
+            else:
+                probe_error = result.get("error") or "Error enumerating local UHD/USRP devices"
+                raise Exception(probe_error)
+
+            reply["success"] = True
+            reply["data"] = result
+            logger.info("Detected %d local UHD/USRP device(s)", len(result))
+            _log_probe_antenna_summary(probe_name, result)
+
+        except asyncio.TimeoutError:
+            probe_process.kill()
+            logger.error("Process timed out while probing local UHD/USRP devices")
+            reply["success"] = False
+            reply["error"] = "Operation timed out after 5 seconds"
+
+    except Exception as e:
+        logger.error("Error probing local UHD/USRP devices: %s", str(e))
+        logger.exception(e)
+        reply["success"] = False
+        reply["error"] = str(e)
+
+    logger.info("Done probing local UHD/USRP devices")
+    return reply
+
+
 async def _fetch_sdr_parameters(dbsession, sdr_id, timeout=30.0):
     """Retrieve SDR parameters from the SDR process manager with caching"""
 
@@ -1107,6 +1180,19 @@ async def get_local_rtl_sdr_devices_handler(
     }
 
 
+async def get_local_uhd_devices_handler(
+    sio: Any, data: Optional[Dict], logger: Any, sid: str
+) -> Dict[str, Union[bool, list, str]]:
+    """Get local UHD/USRP devices."""
+    logger.debug("Getting local UHD/USRP devices")
+    devices = await get_local_uhd_devices()
+    return {
+        "success": devices["success"],
+        "data": devices["data"],
+        "error": devices["error"],
+    }
+
+
 def register_handlers(registry):
     """Register hardware handlers with the command registry."""
     registry.register_batch(
@@ -1136,5 +1222,6 @@ def register_handlers(registry):
             "get-sdr-parameters": (get_sdr_parameters, "api_call"),
             "get-local-soapy-sdr-devices": (get_local_soapy_sdr_devices_handler, "api_call"),
             "get-local-rtl-sdr-devices": (get_local_rtl_sdr_devices_handler, "api_call"),
+            "get-local-uhd-devices": (get_local_uhd_devices_handler, "api_call"),
         }
     )

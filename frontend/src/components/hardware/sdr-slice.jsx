@@ -67,6 +67,29 @@ export const fetchLocalRtlSdrDevices = createAsyncThunk(
 );
 
 
+export const fetchLocalUhdDevices = createAsyncThunk(
+    'sdrs/fetchLocalUhdDevices',
+    async ({socket}, {rejectWithValue}) => {
+        try {
+            return await new Promise((resolve, reject) => {
+                socket.emit("api.call", {
+  cmd: 'get-local-uhd-devices',
+  data: null
+}, res => {
+  if (res.success) {
+    resolve(res.data);
+  } else {
+    reject(new Error('Failed to fetch local UHD devices'));
+  }
+});
+            });
+        } catch (error) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
+
 export const fetchSoapySDRServers = createAsyncThunk(
     'sdrs/fetchSoapySDRServers',
     async ({socket}, {rejectWithValue}) => {
@@ -215,12 +238,14 @@ const sdrsSlice = createSlice({
         loading: false,
         loadingLocalSDRs: false,
         loadingLocalRtlSDRs: false,
+        loadingLocalUhdSDRs: false,
         pageSize: 10,
         formValues: defaultSDR,
         soapyServers: {},
         selectedSdrDevice: "",
         localSoapyDevices: [],
         localRtlDevices: [],
+        localUhdDevices: [],
     },
     reducers: {
         setSDRs: (state, action) => {
@@ -372,6 +397,21 @@ const sdrsSlice = createSlice({
             })
             .addCase(fetchLocalRtlSdrDevices.rejected, (state, action) => {
                 state.loadingLocalRtlSDRs = false;
+                state.status = 'failed';
+                state.error = action.payload;
+            })
+            .addCase(fetchLocalUhdDevices.pending, (state) => {
+                state.loadingLocalUhdSDRs = true;
+                state.error = null;
+                state.status = 'loading';
+            })
+            .addCase(fetchLocalUhdDevices.fulfilled, (state, action) => {
+                state.loadingLocalUhdSDRs = false;
+                state.status = 'succeeded';
+                state.localUhdDevices = action.payload;
+            })
+            .addCase(fetchLocalUhdDevices.rejected, (state, action) => {
+                state.loadingLocalUhdSDRs = false;
                 state.status = 'failed';
                 state.error = action.payload;
             });
