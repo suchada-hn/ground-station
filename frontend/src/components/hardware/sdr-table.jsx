@@ -204,6 +204,19 @@ const normalizeAntennaInfo = (antennas) => ({
     tx: normalizeAntennaPorts(antennas?.tx),
 });
 
+const mergeAntennaPortLists = (...lists) => {
+    const merged = [];
+    lists.forEach((list) => {
+        if (!Array.isArray(list)) return;
+        list.forEach((port) => {
+            const portName = String(port || '').trim();
+            if (!portName || merged.includes(portName)) return;
+            merged.push(portName);
+        });
+    });
+    return merged;
+};
+
 const normalizeAntennaLabels = (labels) => {
     if (!labels || typeof labels !== 'object') return {};
 
@@ -273,6 +286,7 @@ export default function SDRsPage() {
     const [selectedRtlDevice, setSelectedRtlDevice] = useState('');
     const [deleteConfirmText, setDeleteConfirmText] = useState('');
     const [discovering, setDiscovering] = useState(false);
+    const [stickyAntennaPorts, setStickyAntennaPorts] = useState({ rx: [], tx: [] });
     const hasInitialized = useRef(false);
     const rtlProbeRequested = useRef(false);
     const { t } = useTranslation('hardware');
@@ -370,8 +384,15 @@ export default function SDRsPage() {
             setSelectedRtlDevice('');
         } else {
             rtlProbeRequested.current = false;
+            setStickyAntennaPorts({ rx: [], tx: [] });
         }
     }, [openAddDialog]);
+
+    useEffect(() => {
+        if (!openAddDialog) return;
+        // Reset row visibility cache when the selected device context changes.
+        setStickyAntennaPorts({ rx: [], tx: [] });
+    }, [openAddDialog, formValues.id, formValues.type, formValues.host, selectedRtlDevice, selectedSdrDevice]);
 
     useEffect(() => {
         const isRtlUsb = rtlUsbTypes.has(formValues.type);
@@ -489,11 +510,10 @@ export default function SDRsPage() {
     };
 
     const getVisibleAntennaInfo = () => {
-        // Probe data is the primary source.
         const probeInfo = getCurrentProbeAntennaInfo();
         const merged = {
-            rx: [...probeInfo.rx],
-            tx: [...probeInfo.tx],
+            rx: [...stickyAntennaPorts.rx],
+            tx: [...stickyAntennaPorts.tx],
         };
 
         // In edit mode (or when probes are not active), keep previously saved antenna
@@ -508,8 +528,51 @@ export default function SDRsPage() {
             });
         });
 
+        merged.rx = mergeAntennaPortLists(merged.rx, probeInfo.rx);
+        merged.tx = mergeAntennaPortLists(merged.tx, probeInfo.tx);
+
         return merged;
     };
+
+    useEffect(() => {
+        if (!openAddDialog) return;
+
+        const probeInfo = getCurrentProbeAntennaInfo();
+        const persistedLabels = normalizeAntennaLabels(formValues.antenna_labels);
+        const nextRx = mergeAntennaPortLists(
+            stickyAntennaPorts.rx,
+            probeInfo.rx,
+            Object.keys(persistedLabels?.rx || {})
+        );
+        const nextTx = mergeAntennaPortLists(
+            stickyAntennaPorts.tx,
+            probeInfo.tx,
+            Object.keys(persistedLabels?.tx || {})
+        );
+
+        if (
+            nextRx.length === stickyAntennaPorts.rx.length &&
+            nextTx.length === stickyAntennaPorts.tx.length &&
+            nextRx.every((port, idx) => port === stickyAntennaPorts.rx[idx]) &&
+            nextTx.every((port, idx) => port === stickyAntennaPorts.tx[idx])
+        ) {
+            return;
+        }
+
+        setStickyAntennaPorts({ rx: nextRx, tx: nextTx });
+    }, [
+        openAddDialog,
+        formValues.antenna_labels,
+        formValues.type,
+        formValues.host,
+        localRtlDevices,
+        localSoapyDevices,
+        selectedRtlDevice,
+        selectedSdrDevice,
+        soapyServers,
+        stickyAntennaPorts.rx,
+        stickyAntennaPorts.tx,
+    ]);
 
     const handleAntennaLabelChange = (direction, internalPortName, rawLabel) => {
         const portName = String(internalPortName || '').trim();
@@ -539,26 +602,7 @@ export default function SDRsPage() {
     };
 
     const getPersistedAntennaLabels = () => {
-        const normalizedLabels = normalizeAntennaLabels(formValues.antenna_labels);
-        const antennaPorts = getCurrentProbeAntennaInfo();
-        const nextLabels = { ...normalizedLabels };
-
-        ['rx', 'tx'].forEach((direction) => {
-            const ports = antennaPorts?.[direction] || [];
-            if (!ports.length) return;
-
-            const directionLabels = { ...(nextLabels[direction] || {}) };
-            ports.forEach((portName) => {
-                if (directionLabels[portName]) return;
-                directionLabels[portName] = String(portName).slice(0, MAX_ANTENNA_LABEL_LENGTH);
-            });
-
-            if (Object.keys(directionLabels).length > 0) {
-                nextLabels[direction] = directionLabels;
-            }
-        });
-
-        return nextLabels;
+        return normalizeAntennaLabels(formValues.antenna_labels);
     };
 
     const handleChange = (e) => {
@@ -1173,30 +1217,37 @@ export default function SDRsPage() {
             }
 
             fields.push(
-                <TextField
-                    key="frequency_min"
-                    name="frequency_min"
-                    label={t('sdr.min_frequency_mhz')}
-                    fullWidth
-                    size="small"
-                    type="number"
-                    onChange={handleChange}
-                    value={getFieldValue('frequency_min')}
-                    error={Boolean(validationErrors.frequency_min)}
-                    InputProps={{ endAdornment: <InputAdornment position="end">MHz</InputAdornment> }}
-                />,
-                <TextField
-                    key="frequency_max"
-                    name="frequency_max"
-                    label={t('sdr.max_frequency_mhz')}
-                    fullWidth
-                    size="small"
-                    type="number"
-                    onChange={handleChange}
-                    value={getFieldValue('frequency_max')}
-                    error={Boolean(validationErrors.frequency_max)}
-                    InputProps={{ endAdornment: <InputAdornment position="end">MHz</InputAdornment> }}
-                />
+                <Box
+                    key="frequency-row"
+                    sx={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                        gap: 1.5,
+                    }}
+                >
+                    <TextField
+                        name="frequency_min"
+                        label={t('sdr.min_frequency_mhz')}
+                        fullWidth
+                        size="small"
+                        type="number"
+                        onChange={handleChange}
+                        value={getFieldValue('frequency_min')}
+                        error={Boolean(validationErrors.frequency_min)}
+                        InputProps={{ endAdornment: <InputAdornment position="end">MHz</InputAdornment> }}
+                    />
+                    <TextField
+                        name="frequency_max"
+                        label={t('sdr.max_frequency_mhz')}
+                        fullWidth
+                        size="small"
+                        type="number"
+                        onChange={handleChange}
+                        value={getFieldValue('frequency_max')}
+                        error={Boolean(validationErrors.frequency_max)}
+                        InputProps={{ endAdornment: <InputAdornment position="end">MHz</InputAdornment> }}
+                    />
+                </Box>
             );
 
             // Driver field - only show for types that don't exclude it
@@ -1333,11 +1384,8 @@ export default function SDRsPage() {
                                             <TextField
                                                 size="small"
                                                 label={t('sdr.antenna_label', 'Label')}
-                                                placeholder={t(
-                                                    'sdr.antenna_label_placeholder',
-                                                    'e.g. UHF Yagi'
-                                                )}
-                                                value={antennaLabels?.[direction.key]?.[portName] ?? portName}
+                                                placeholder={portName}
+                                                value={antennaLabels?.[direction.key]?.[portName] ?? ''}
                                                 onChange={(e) =>
                                                     handleAntennaLabelChange(
                                                         direction.key,
