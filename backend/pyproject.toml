@@ -281,4 +281,4 @@ exclude_lines = [
 
 
 [tool.vercel]
-entrypoint = "server/startup:app"
+entrypoint = "server.startup:app"
